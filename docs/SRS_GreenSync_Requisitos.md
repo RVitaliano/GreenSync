@@ -2,8 +2,8 @@
 ## Para GreenSync
 
 Version 0.1
-Prepared by [nome do grupo]
-[Instituição / Disciplina]
+Prepared by [GreenSync]
+[Faculdade Nova Roma]
 31 de agosto de 2026
 
 ## Table of Contents
@@ -37,6 +37,7 @@ Prepared by [nome do grupo]
 | Name | Date | Reason For Changes | Version |
 |------|------|--------------------|---------|
 | Grupo GreenSync | 31/08/2026 | Primeira versão, consolidando decisões tomadas até a reunião com o professor orientador | 0.1 |
+| Grupo GreenSync | 06/09/2026 | Unificação da terminologia do time (sem referência a integrantes individuais); definição do provedor de LLM (Google Gemini, camada gratuita); ajuste da estratégia de desenvolvimento do módulo de IA para ocorrer em paralelo com a V1 | 0.2 |
 
 ## 1. Introduction
 
@@ -91,7 +92,7 @@ A Seção 2 dá uma visão geral do produto (contexto, funções, restrições, 
 
 ### 2.1 Product Perspective
 
-O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, inspirado em conversas com o professor orientador (cujo projeto pessoal usa arquitetura de IA local — decisão consciente do grupo foi seguir por um caminho de LLM em nuvem, ver ADR-004). Não há sistema legado a substituir. O sistema depende de três serviços de terceiros essenciais: HiveMQ Cloud (broker MQTT), Firebase (Firestore, sincronização e armazenamento), e um provedor de LLM/STT/TTS em nuvem ainda a definir. Não há SLA formal contratado — todos os serviços usados são de camada gratuita ou de baixo custo.
+O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, inspirado em conversas com o professor orientador (cujo projeto pessoal usa arquitetura de IA local — decisão consciente do grupo foi seguir por um caminho de LLM em nuvem, ver ADR-004). Não há sistema legado a substituir. O sistema depende de três serviços de terceiros essenciais: HiveMQ Cloud (broker MQTT), Firebase (Firestore, sincronização e armazenamento), e provedores de LLM/STT/TTS em nuvem — o LLM já definido (Google Gemini, camada gratuita), com STT e TTS ainda a definir. Não há SLA formal contratado — todos os serviços usados são de camada gratuita ou de baixo custo.
 
 ### 2.2 Product Functions
 
@@ -132,7 +133,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 | O Render (free tier) mantém o backend disponível o suficiente para a demonstração | Backend pode "dormir" e demorar a responder na primeira requisição — ver Seção 3.3.4 |
 | Existe conectividade Wi-Fi com internet no local da demonstração da V1 | Sistema não teria como sincronizar dados na demo |
 | A operadora escolhida para o chip SIM (V2) oferece cobertura no local de uso | Módulo GPRS não conseguiria conectar |
-| O provedor de LLM/STT/TTS escolhido tem suporte adequado a português | Respostas do assistente de voz poderiam ter qualidade baixa |
+| O Google Gemini (LLM já definido) e os provedores de STT/TTS (ainda a definir) têm suporte adequado a português | Respostas do assistente de voz poderiam ter qualidade baixa |
 | A sonda de pH adquirida é confiável o suficiente para leituras consistentes | Maior risco técnico identificado pelo grupo — ver Seção 11 do Arc42 |
 
 ### 2.6 Apportioning of Requirements
@@ -142,7 +143,8 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 | Leitura de sensores, irrigação automática, publicação MQTT | V1 | Hardware/firmware |
 | Backend (assinatura MQTT, escrita no Firestore) | V1 | Backend |
 | App — exibição de dados em tempo real e histórico | V1 | App/design |
-| Assistente de voz (LLM, STT, TTS) integrado ao hardware | V2 | Backend + Hardware/firmware |
+| Módulo de orquestração de IA (LLM via Google Gemini) — desenvolvimento e testes com dados do Firestore | V1 (em paralelo) | Backend |
+| Assistente de voz — integração do módulo de IA ao hardware (captura de áudio, STT, TTS, reprodução) | V2 | Backend + Hardware/firmware |
 | Conectividade GPRS | V2 | Hardware/firmware |
 
 ## 3. Requirements
@@ -174,7 +176,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 | Broker MQTT (HiveMQ Cloud) | Broker → Backend | MQTT sobre TLS (porta 8883) | Leituras de sensores em JSON (assinatura de tópico) |
 | Firebase (Firestore) | Backend → Firestore | SDK Admin (gRPC/HTTPS) | Documentos de leitura atual e histórico |
 | Firebase (Firestore) | Firestore → App | FlutterFire (SDK cliente) | Listeners em tempo real |
-| API de LLM (nuvem) | Backend → Provedor **[A DEFINIR]** | HTTPS/REST | Pergunta do usuário + contexto de dados do sensor → resposta em texto |
+| API de LLM (nuvem) | Backend → Google Gemini API | HTTPS/REST | Pergunta do usuário + contexto de dados do sensor → resposta em texto |
 | API de STT (nuvem) | Backend → Provedor **[A DEFINIR]** | HTTPS/REST | Áudio → texto |
 | API de TTS (nuvem) | Backend → Provedor **[A DEFINIR]** | HTTPS/REST | Texto → áudio |
 
@@ -237,7 +239,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Diferencial do produto; objetivo central da V2.
 - Acceptance Criteria: Pergunta como "como está minha planta?" resulta em resposta coerente com os dados atuais de pH/umidade/temperatura.
 - Verification Method: Demonstration
-- More Information: Não inclui controle de atuadores por voz — assistente é somente consultivo.
+- More Information: Não inclui controle de atuadores por voz — assistente é somente consultivo. LLM: Google Gemini API (ver ADR-004); módulo de orquestração desenvolvido em paralelo desde a V1, integrado ao hardware de voz somente na V2.
 
 - ID: REQ-FUNC-009
 - Title: Mute físico do microfone
@@ -323,7 +325,7 @@ O backend é desenhado para múltiplos dispositivos no futuro (estrutura `device
 
 #### 3.5.7 Cost
 
-- Todos os serviços de nuvem usados devem permanecer em camada gratuita ou de baixo custo: HiveMQ Cloud (free tier), Render (free tier), Firebase (free tier do Firestore), e o provedor de LLM/STT/TTS ainda a escolher com esse mesmo critério.
+- Todos os serviços de nuvem usados devem permanecer em camada gratuita ou de baixo custo: HiveMQ Cloud (free tier), Render (free tier), Firebase (free tier do Firestore), Google Gemini API (free tier — já escolhido com esse critério, ver ADR-004), e os provedores de STT/TTS ainda a escolher com o mesmo critério.
 - Custo de hardware é único (compra de componentes), não recorrente.
 
 #### 3.5.8 Deadline
@@ -345,9 +347,10 @@ Esta seção se aplica somente à V2 (assistente de voz). Dado o porte acadêmic
 
 #### 3.6.1 Model Specification
 
-- O modelo é uma API de LLM em nuvem de terceiros, provedor **[A DEFINIR]** (critério: gratuito ou de baixo custo, boa qualidade em português).
+- O modelo é a API do **Google Gemini**, escolhida por oferecer camada gratuita (critério: custo zero) com qualidade adequada em português — ver ADR-004.
 - Escopo do modelo: responder perguntas sobre o estado da planta a partir dos dados reais dos sensores (contexto injetado no prompt) — não é um chatbot de propósito geral.
 - Não há dataset de validação próprio nem versionamento de modelo pelo grupo — a qualidade é a fornecida pelo provedor escolhido.
+- O módulo de orquestração desse LLM é desenvolvido e testado em paralelo já durante a V1 (com dados reais do Firestore, mas sem o hardware de voz ainda conectado) — ver ADR-011 e Seção 2.6.
 
 #### 3.6.2 Data Management
 

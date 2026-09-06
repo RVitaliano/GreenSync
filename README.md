@@ -4,12 +4,12 @@ Vaso inteligente que monitora pH do solo, umidade do solo e temperatura do ar, c
 
 ## Visão geral
 
-O GreenSync lê os sensores, decide quando regar a planta sozinho e envia os dados pra nuvem, de onde o aplicativo mostra tudo em tempo real. Na V2, o vaso também responde perguntas faladas sobre a planta, usando um assistente de voz.
+O GreenSync lê os sensores, decide quando regar a planta sozinho e envia os dados pra nuvem, de onde o aplicativo mostra tudo em tempo real. Na V2, o vaso também responde perguntas faladas sobre a planta, usando um assistente de voz com LLM (Google Gemini, camada gratuita).
 
 ### Fases
 
-- **V1** — hardware, sensores, irrigação automática, sincronização de dados (Wi-Fi → MQTT → backend → Firebase), app básico.
-- **V2** — assistente de voz (LLM em nuvem) integrado ao hardware, e troca do Wi-Fi por conectividade GPRS.
+- **V1** — hardware, sensores, irrigação automática, sincronização de dados (Wi-Fi → MQTT → backend → Firebase), app básico. O módulo de orquestração de IA (chamadas ao Gemini) é desenvolvido e testado em paralelo já nessa fase, com dados reais do Firestore — mas ainda sem estar conectado ao hardware de voz.
+- **V2** — integração completa do assistente de voz ao hardware (captura de áudio, STT, TTS, reprodução), e troca do Wi-Fi por conectividade GPRS.
 
 ## Arquitetura
 
@@ -27,11 +27,11 @@ O vaso só lê sensores e publica no MQTT — toda a lógica de negócio (valida
 
 ## Estrutura do repositório
 
-| Pasta | Responsável | O que tem |
+| Pasta | Frente | O que tem |
 |---|---|---|
-| `firmware/` | Colega 1 | Código do ESP32-S3 (sensores, bomba, display, MQTT) |
-| `backend/` | Você | FastAPI + assinante MQTT + gravação no Firestore |
-| `app/` | Colega 2 | Aplicativo Flutter |
+| `firmware/` | Hardware/Firmware | Código do ESP32-S3 (sensores, bomba, display, MQTT) |
+| `backend/` | Backend | FastAPI + assinante MQTT + gravação no Firestore + módulo de IA (Gemini) |
+| `app/` | App | Aplicativo Flutter |
 | `docs/` | Todos | SRS, ADR, Arc42 — documentação do projeto |
 
 ## Contrato MQTT (Firmware ↔ Backend)
@@ -61,14 +61,6 @@ docker compose up
 ```
 
 Sobe o backend (com hot-reload) e um broker MQTT local (Mosquitto), pra testar sem depender do HiveMQ Cloud. Detalhes em `backend/README.md`.
-
-## Time
-
-| Quem | Frente |
-|---|---|
-| Colega 1 | Hardware/Firmware |
-| Você | Backend |
-| Colega 2 | App |
 
 ## Branches
 

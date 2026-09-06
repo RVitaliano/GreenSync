@@ -21,9 +21,9 @@ O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo e te
 
 | Role/Name | Contact | Expectations |
 |---|---|---|
-| Integrante — Hardware/Firmware | Colega 1 | Contrato de tópicos/JSON MQTT estável e definido cedo, para trabalhar em paralelo |
-| Integrante — App/Design | Colega 2 | Esquema do Firestore estável, para consumir dados corretamente no app |
-| Integrante — Backend (autor deste documento) | — | Visão completa da integração entre hardware, nuvem e app |
+| Frente — Hardware/Firmware | Equipe GreenSync | Contrato de tópicos/JSON MQTT estável e definido cedo, para trabalhar em paralelo |
+| Frente — App/Design | Equipe GreenSync | Esquema do Firestore estável, para consumir dados corretamente no app |
+| Frente — Backend | Equipe GreenSync | Visão completa da integração entre hardware, nuvem e app |
 | Professor orientador | — | Uso de MQTT (conteúdo da disciplina), projeto funcional de ponta a ponta na demonstração |
 
 ---
@@ -64,7 +64,7 @@ ESP32-S3 ──MQTT/TLS──> HiveMQ Cloud (broker) ──MQTT/TLS──> Backe
                                                         App (Flutter, FlutterFire)
 ```
 
-Na V2, o backend também se comunica com APIs externas de LLM, STT e TTS (provedores a definir), e o ESP32-S3 pode usar um módulo GPRS em vez de Wi-Fi como camada de rede subjacente ao MQTT.
+O módulo de orquestração de IA (chamadas ao Gemini) começa a ser desenvolvido e testado já durante a V1, junto ao restante do backend, ainda que sua integração ao hardware de voz só ocorra na V2 (ver ADR-011). Na V2, o backend também se comunica com a API do **Google Gemini** (LLM, já definido — ver ADR-004) e com APIs externas de STT e TTS (provedores ainda a definir), e o ESP32-S3 pode usar um módulo GPRS em vez de Wi-Fi como camada de rede subjacente ao MQTT.
 
 ---
 
@@ -80,7 +80,7 @@ A estratégia central é manter o ESP32-S3 dedicado apenas à leitura de sensore
 
 **Motivation**
 
-O sistema é dividido em cinco blocos principais, alinhados às responsabilidades das três frentes do grupo: firmware (Colega 1), backend (autor), e app (Colega 2) — os dois blocos de infraestrutura (broker MQTT e Firebase) são serviços de terceiros configurados pelo grupo, não código próprio.
+O sistema é dividido em cinco blocos principais, alinhados às responsabilidades das três frentes do grupo: firmware, backend e app — os dois blocos de infraestrutura (broker MQTT e Firebase) são serviços de terceiros configurados pelo grupo, não código próprio.
 
 **Contained Building Blocks**
 
@@ -99,8 +99,8 @@ O sistema é dividido em cinco blocos principais, alinhados às responsabilidade
 
 ### Backend (Python + FastAPI, Render)
 
-- Purpose/Responsibility: assinar os tópicos MQTT, validar e gravar os dados no Firestore. Na V2: orquestrar as chamadas de STT, LLM e TTS.
-- Interface(s): cliente MQTT (assinante); SDK Admin do Firebase; APIs REST de LLM/STT/TTS (V2).
+- Purpose/Responsibility: assinar os tópicos MQTT, validar e gravar os dados no Firestore. O módulo de orquestração de IA (chamadas ao Gemini) é desenvolvido em paralelo já na V1; na V2, esse módulo passa a orquestrar também as chamadas de STT e TTS, integradas ao hardware de voz.
+- Interface(s): cliente MQTT (assinante); SDK Admin do Firebase; API do Google Gemini (LLM); APIs REST de STT/TTS (V2).
 - Fulfilled Requirements: REQ-FUNC-004, REQ-FUNC-008 (V2).
 - Open Issues/Problems/Risks: camada gratuita do Render "dorme" após inatividade (ver Seção 10).
 
@@ -132,7 +132,7 @@ Módulos internos: leitura de sensores (pH, umidade, temperatura), controle de i
 
 ### White Box: Backend (V1)
 
-Módulos internos: cliente MQTT assíncrono (assinante), camada de gravação no Firestore (SDK Admin). Na V2, adiciona-se um módulo de orquestração de IA (STT → LLM → TTS).
+Módulos internos: cliente MQTT assíncrono (assinante), camada de gravação no Firestore (SDK Admin), e o módulo de orquestração de IA (chamadas ao Google Gemini), já desenvolvido e testado em paralelo desde a V1 — ver ADR-011. Na V2, esse módulo é estendido para incluir STT e TTS, e passa a ser acionado pelo firmware via hardware de voz.
 
 ## 5.3 Level 3
 
@@ -161,9 +161,9 @@ Não detalhado nesta versão do documento — nível de profundidade não necess
 
 1. O usuário fala uma pergunta próxima ao vaso; o firmware detecta a wake-word e captura o áudio.
 2. O áudio é enviado ao backend (canal a definir — possivelmente um tópico MQTT dedicado ou uma conexão direta).
-3. O backend envia o áudio à API de STT, obtendo o texto da pergunta.
-4. O backend monta um prompt com a pergunta e os dados mais recentes do Firestore, e chama a API de LLM.
-5. A resposta em texto é enviada à API de TTS, gerando áudio.
+3. O backend envia o áudio à API de STT (provedor a definir), obtendo o texto da pergunta.
+4. O backend monta um prompt com a pergunta e os dados mais recentes do Firestore, e chama a API do **Google Gemini** (LLM).
+5. A resposta em texto é enviada à API de TTS (provedor a definir), gerando áudio.
 6. O áudio de resposta é enviado de volta ao firmware, que o reproduz no alto-falante.
 
 ---
@@ -279,7 +279,7 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | Vedação física do vaso | Separação entre câmara eletrônica seca e substrato úmido é um desafio real de fabricação | Prototipar e testar a vedação antes da montagem final |
 | Backend em camada gratuita | Render pode "dormir", introduzindo latência perceptível | Aceito para o escopo acadêmico; poderia ser mitigado com um serviço pago em um cenário real |
 | Contrato MQTT ainda não validado entre as frentes | Proposta na Seção 8.1 ainda não foi confirmada com o responsável pelo firmware | Validar e travar o contrato antes do desenvolvimento paralelo avançar |
-| Provedor de LLM/STT/TTS não definido | V2 depende dessa escolha, ainda em aberto | Decisão a ser tomada com critério de custo (gratuito/baixo custo) antes do início da V2 |
+| Provedor de STT/TTS não definido | V2 depende dessa escolha, ainda em aberto (LLM já definido: Google Gemini, ver ADR-004) | Decisão a ser tomada com critério de custo (gratuito/baixo custo) antes do início da V2 |
 
 ---
 

@@ -52,19 +52,19 @@ Fica mais fácil centralizar validação e lógica de negócio (ex.: preparar o 
 
 ---
 
-# ADR-004 — LLM em nuvem em vez de processamento local (NPU dedicado)
+# ADR-004 — LLM em nuvem (Google Gemini API) em vez de processamento local (NPU dedicado)
 
 ## Status
 Aceita
 
 ## Context
-O grupo avaliou usar um módulo de IA local dedicado (inspirado no projeto pessoal do professor orientador, que usa um NPU específico e um modelo pequeno rodando localmente) para o assistente de voz da V2.
+O grupo avaliou usar um módulo de IA local dedicado (inspirado no projeto pessoal do professor orientador, que usa um NPU específico e um modelo pequeno rodando localmente) para o assistente de voz da V2. Optou-se por uma API de LLM em nuvem em vez de processamento local, restando definir qual provedor usar — o critério adotado foi custo zero (camada gratuita) com qualidade adequada em português.
 
 ## Decision
-Usar uma API de LLM em nuvem (provedor ainda a definir, critério de custo zero ou baixo) em vez de processamento local dedicado.
+Usar a API do **Google Gemini** como LLM do assistente de voz, por oferecer camada gratuita suficiente para o volume de uso do projeto e boa qualidade de resposta em português, eliminando a necessidade de processamento local dedicado.
 
 ## Consequences
-Fica mais fácil implementar com qualidade de resposta melhor e sem depender de hardware adicional específico e de configuração especializada. Fica mais difícil manter a filosofia de privacidade/processamento local que orienta o projeto pessoal do professor — decisão consciente do grupo, validada com ele, de que essa não era uma exigência para o projeto da disciplina.
+Fica mais fácil implementar com qualidade de resposta melhor e sem depender de hardware adicional específico e de configuração especializada, além de não haver custo operacional para essa parte do projeto (camada gratuita do Gemini). Fica mais difícil manter a filosofia de privacidade/processamento local que orienta o projeto pessoal do professor — decisão consciente do grupo, validada com ele, de que essa não era uma exigência para o projeto da disciplina. Fica também mais difícil trocar de provedor no futuro caso os limites da camada gratuita do Gemini se tornem insuficientes, exigindo adaptar o módulo de orquestração de IA para outra API.
 
 ---
 
@@ -164,19 +164,19 @@ Fica mais fácil simplificar o hardware, o firmware e reduzir custo. Fica mais d
 
 ---
 
-# ADR-011 — Entrega faseada em V1 e V2
+# ADR-011 — Entrega faseada em V1 e V2, com o módulo de IA desenvolvido em paralelo
 
 ## Status
 Aceita
 
 ## Context
-O escopo completo do projeto (hardware, irrigação automática, sincronização de dados, assistente de voz integrado, conectividade celular) é amplo para ser entregue de uma vez, e o professor orientador sugeriu uma divisão em etapas.
+O escopo completo do projeto (hardware, irrigação automática, sincronização de dados, assistente de voz integrado, conectividade celular) é amplo para ser entregue de uma vez, e o professor orientador sugeriu uma divisão em etapas. Ao mesmo tempo, o módulo de orquestração de IA (chamadas ao Gemini, montagem de prompt com dados do Firestore) não depende do hardware de voz (microfone, alto-falante, GPRS) para começar a ser construído e testado — só depende do backend e de dados simulados/reais já sincronizados no Firestore.
 
 ## Decision
-Dividir a entrega em duas fases: V1 (hardware, sensores, irrigação automática, sincronização de dados via Wi-Fi/MQTT/Firebase, app básico) e V2 (integração do assistente de voz com LLM em nuvem, e substituição do Wi-Fi por conectividade GPRS).
+Dividir a entrega em duas fases: **V1** (hardware, sensores, irrigação automática, sincronização de dados via Wi-Fi/MQTT/Firebase, app básico) e **V2** (integração completa do assistente de voz ao hardware — captura de áudio, reprodução de resposta — e substituição do Wi-Fi por conectividade GPRS). O **módulo de orquestração de IA (LLM via Google Gemini) é desenvolvido em paralelo, já durante a V1**, testado com os dados reais que já estarão sendo gravados no Firestore — mas sem estar conectado ao hardware de voz ainda. A integração desse módulo ao firmware (áudio de entrada/saída) só ocorre na V2.
 
 ## Consequences
-Fica mais fácil priorizar o núcleo funcional do projeto (dados e irrigação) antes de arriscar a complexidade adicional do assistente de voz e da conectividade celular. Fica mais difícil demonstrar a experiência completa do produto (assistente de voz) caso a V2 não seja concluída a tempo — risco aceito e mitigado pela priorização da V1 como entrega mínima viável.
+Fica mais fácil priorizar o núcleo funcional do projeto (dados e irrigação) antes de arriscar a complexidade adicional da integração com hardware de voz e da conectividade celular, e ao mesmo tempo adiantar a parte de IA sem depender do cronograma do hardware — reduzindo o risco de a V2 ficar sobrecarregada no fim do projeto. Fica mais difícil demonstrar a experiência completa do produto (assistente de voz falando de verdade) caso a V2 não seja concluída a tempo — risco aceito e mitigado pela priorização da V1 como entrega mínima viável, com a vantagem de que o módulo de IA já estará pronto e testado (via texto/API) quando a V2 começar.
 
 ---
 
