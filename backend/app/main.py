@@ -1,9 +1,17 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from app.mqtt_client import run_mqtt_subscriber
 
-app = FastAPI(title="GreenSync Backend")
+logging.basicConfig(level=logging.INFO)
 
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(run_mqtt_subscriber())
+    yield
+    task.cancel()
+app = FastAPI(title="GreenSync Backend", lifespan=lifespan)
 @app.get("/")
 def health_check():
-    """Endpoint simples pra confirmar que o backend está de pé."""
     return {"status": "ok"}

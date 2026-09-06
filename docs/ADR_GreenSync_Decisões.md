@@ -193,3 +193,19 @@ Empacotar o backend em uma imagem Docker (Dockerfile), usada tanto para o deploy
 
 ## Consequences
 Fica mais fácil garantir que o ambiente de desenvolvimento é idêntico ao de produção, e que qualquer integrante do grupo sobe o backend localmente com um único comando (`docker compose up`). Fica mais difícil (exige atenção extra) manter o `Dockerfile` e o `docker-compose.yml` sincronizados conforme dependências forem adicionadas, e é preciso tomar cuidado para não vazar credenciais do `.env` no controle de versão.
+
+---
+
+# ADR-013 — Concorrência via `async`/`await` em vez de Celery + Redis
+
+## Status
+Aceita
+
+## Context
+Ao pesquisar como estruturar o backend, o grupo teve contato com o material do professor orientador, cujo projeto pessoal usa uma stack mais robusta (Django + DRF + Postgres + Redis + Celery + EMQX) para lidar com tarefas em segundo plano e concorrência. Era preciso decidir se o GreenSync deveria seguir uma stack semelhante ou uma abordagem mais simples.
+
+## Decision
+Usar apenas os recursos assíncronos nativos do Python (`async`/`await`, FastAPI, `aiomqtt`) para lidar com a concorrência necessária — ouvir o broker MQTT continuamente sem bloquear o restante do backend — em vez de introduzir Celery (execução de tarefas em processos/workers separados) e Redis (fila de mensagens entre esses processos).
+
+## Consequences
+Fica mais fácil manter o backend como um único processo, sem infraestrutura adicional para configurar, monitorar e manter (não é preciso subir workers separados nem um serviço de fila). Isso é suficiente porque o volume de dados do projeto é baixo (um único dispositivo, poucas leituras por minuto — ver SRS, seção 3.3.1) e as tarefas envolvidas (assinar MQTT, validar payload, gravar no Firestore) são rápidas o bastante para caber dentro de funções `async` no mesmo processo do FastAPI. Fica mais difícil escalar esse desenho caso o projeto cresça no futuro para múltiplos dispositivos de alto volume ou tarefas pesadas (ex.: processamento de vídeo, treinamento de modelo) — nesse cenário, uma arquitetura com Celery/Redis (ou equivalente) voltaria a fazer sentido, mas está fora do escopo acadêmico atual.
