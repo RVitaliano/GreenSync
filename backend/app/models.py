@@ -1,20 +1,29 @@
-#validacao payload
+# Validação dos payloads MQTT
+#
+# greensync/{deviceId}/sensores
+# {"ph": 6.4, "umidade_solo": 42, "temperatura_ar": 24.1,
+#  "umidade_ar": 58, "bomba_ligada": false, "timestamp": 1735000000}
+#
+# greensync/{deviceId}/status
+# {"status": "online"} ou {"status": "offline"}
 
-#greensync/{devideID}/sensores
-#payload: {"ph": 6.4, "umidade_solo": 42, "temperatura_ar": 24.1, "bomba_ligada": false, "timestamp": 1735000000}
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+
 class SensorReading(BaseModel):
-    #payload publicado pelo esp32
-    
+    """Payload publicado pelo ESP32-WROOM."""
+
     ph: float = Field(..., ge=0, le=14, description="pH do solo")
     umidade_solo: float = Field(..., ge=0, le=100, description="Umidade do solo em %")
-    temperatura_ar: float = Field(..., description="Temperatura do ar em °C")
+    temperatura_ar: float = Field(..., ge=-40, le=80, description="Temperatura do ar em °C (faixa do DHT22)")
+    umidade_ar: Optional[float] = Field(None, ge=0, le=100, description="Umidade do ar em %")
     bomba_ligada: bool = Field(..., description="Estado atual da bomba d'água")
-    timestamp: int = Field(..., description="Unix timestamp (segundos) da leitura")
+    timestamp: Optional[int] = Field(None, description="Unix timestamp (s); se faltar, o backend carimba")
+
 
 class DeviceStatus(BaseModel):
-    #payload Last Will, (automatico pelo broker)
+    """Payload de status (Last Will é publicado pelo broker)."""
 
-    status: str = Field(..., description='"Online" ou "Offline"')
+    status: Literal["online", "offline"]
