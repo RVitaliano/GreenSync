@@ -10,6 +10,7 @@ services:
       - .env
     volumes:
       - ./app:/app/app
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
     depends_on:
       - mosquitto
     restart: unless-stopped

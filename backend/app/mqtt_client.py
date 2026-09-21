@@ -7,6 +7,8 @@ from pydantic import ValidationError
 from app.config import settings
 from app.models import DeviceStatus, SensorReading
 
+from app.firebase_client import save_reading, save_status
+
 logger = logging.getLogger("greensync.mqtt")
 
 
@@ -31,11 +33,11 @@ async def handle_message(message: aiomqtt.Message) -> None:
         if kind == "sensores":
             reading = SensorReading.model_validate_json(message.payload)
             logger.info("[%s] leitura válida: %s", device_id, reading)
-            # próximo passo: gravar no Firestore
+            await save_reading(device_id, reading)
         elif kind == "status":
             status = DeviceStatus.model_validate_json(message.payload)
             logger.info("[%s] status: %s", device_id, status.status)
-            # próximo passo: atualizar status no Firestore
+            await save_status(device_id, status.status)
         else:
             logger.warning("[%s] tipo de tópico desconhecido: %s", device_id, kind)
     except ValidationError as exc:
@@ -43,7 +45,6 @@ async def handle_message(message: aiomqtt.Message) -> None:
             "[%s] payload inválido em %s, descartado: %s",
             device_id, topic, exc.errors(include_url=False),
         )
-
 
 async def run_mqtt_subscriber() -> None:
     """Conecta no broker e reconecta automaticamente se cair."""
