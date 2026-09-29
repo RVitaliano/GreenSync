@@ -1,13 +1,13 @@
 import asyncio
 import logging
+import ssl
 
 import aiomqtt
 from pydantic import ValidationError
 
 from app.config import settings
-from app.models import DeviceStatus, SensorReading
-
 from app.firebase_client import save_reading, save_status
+from app.models import DeviceStatus, SensorReading
 
 logger = logging.getLogger("greensync.mqtt")
 
@@ -46,6 +46,7 @@ async def handle_message(message: aiomqtt.Message) -> None:
             device_id, topic, exc.errors(include_url=False),
         )
 
+
 async def run_mqtt_subscriber() -> None:
     """Conecta no broker e reconecta automaticamente se cair."""
     while True:
@@ -55,6 +56,7 @@ async def run_mqtt_subscriber() -> None:
                 port=settings.mqtt_port,
                 username=settings.mqtt_username or None,
                 password=settings.mqtt_password or None,
+                tls_context=ssl.create_default_context() if settings.mqtt_use_tls else None,
             ) as client:
                 logger.info(
                     "Conectado ao broker MQTT em %s:%s",
