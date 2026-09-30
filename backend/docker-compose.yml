@@ -4,10 +4,13 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
     env_file:
       - .env
     volumes:
       - ./app:/app/app
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
     depends_on:
       - mosquitto
     restart: unless-stopped
