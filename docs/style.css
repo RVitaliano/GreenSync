@@ -1,80 +1,111 @@
+/* Importando uma fonte mais moderna do Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
 body {
-    font-family: Arial, sans-serif;
+    font-family: 'Inter', Arial, sans-serif;
     margin: 0;
-    padding: 20px;
-    background-color: #f4f4f4;
+    padding: 0;
+    background-color: #f0f4f8; /* Fundo cinza/azulado bem suave para destacar o conteúdo */
+    color: #333;
 }
 
-/* Container amarelo da imagem */
+/* O cabeçalho agora adota o Azul Escuro do banner */
 .cabecalho-amarelo {
-    background-color: #fae38c; /* Amarelo da imagem */
-    padding: 20px;
-    max-width: 800px;
-    margin: 0 auto;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    background-color: #041e42; /* Azul Escuro GreenSync */
+    padding: 25px 20px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
-/* Alinhamento do logo e título */
+/* Alinhamento do logo e título no centro */
 .linha-superior {
     display: flex;
     align-items: center;
-    margin-bottom: 10px;
+    justify-content: center;
+    margin-bottom: 20px;
 }
 
 .logo {
-    width: 60px;
-    height: 60px;
-    background-color: white;
-    padding: 5px;
+    width: 65px;
+    height: 65px;
+    border-radius: 12px; /* Bordas arredondadas no logo */
     margin-right: 15px;
-    border: 1px solid #ddd;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
-/* Título com fundo branco da imagem */
+/* Título com a cor Verde Menta da identidade */
 .titulo-branco {
-    background-color: white;
-    padding: 8px 15px;
-    font-size: 24px;
-    font-weight: normal;
-    text-transform: uppercase;
+    background-color: transparent;
+    color: #4ade80; /* Verde Menta brilhante */
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 1px;
 }
 
-/* Menu de navegação inferior com fundo branco */
+/* Menu de navegação em formato de "pílula" */
 .menu-branco {
-    background-color: white;
-    padding: 5px 10px;
-    display: inline-block;
+    background-color: rgba(255, 255, 255, 0.1); /* Fundo levemente transparente */
+    padding: 10px 30px;
+    border-radius: 30px;
+    display: flex;
+    gap: 20px;
 }
 
 .menu-branco a {
     text-decoration: none;
-    color: black;
-    font-size: 18px;
-    margin-right: 15px;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 600;
+    transition: all 0.3s ease;
 }
 
+/* Efeito ao passar o mouse no menu */
 .menu-branco a:hover {
-    text-decoration: underline;
+    color: #4ade80;
+    transform: translateY(-2px);
 }
 
-/* Estilo do conteúdo principal */
+/* Área de conteúdo principal em formato de "Cartão" */
 .conteudo {
-    max-width: 800px;
-    margin: 20px auto;
-    background-color: white;
-    padding: 20px;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    max-width: 900px;
+    margin: 40px auto;
+    background-color: #ffffff;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
 }
-/* Estilo Terminal para blocos de código */
+
+/* Estilização das Seções e Títulos Internos */
+section {
+    margin-bottom: 45px;
+}
+
+section h2 {
+    border-bottom: 3px solid #4ade80; /* Linha verde decorativa */
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+    color: #041e42; /* Azul Escuro nos subtítulos */
+    font-size: 26px;
+}
+
+p, li {
+    line-height: 1.7;
+    font-size: 16px;
+    color: #4b5563;
+}
+
+/* Estilo Terminal Profissional para os blocos de código */
 .terminal {
-    background-color: #1e1e1e;
-    color: #d4d4d4;
-    padding: 15px;
-    border-radius: 6px;
-    font-family: 'Courier New', Courier, monospace;
+    background-color: #0d1117; /* Fundo bem escuro estilo VS Code */
+    color: #c9d1d9;
+    padding: 20px;
+    border-radius: 8px;
+    font-family: 'Consolas', 'Courier New', monospace;
     overflow-x: auto;
-    margin: 15px 0;
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+    margin: 20px 0;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3);
 }
 
 .terminal pre {
@@ -83,16 +114,4 @@ body {
 
 .terminal code {
     font-size: 14px;
-}
-
-/* Espaçamento interno das seções */
-section {
-    margin-bottom: 40px;
-}
-
-section h2 {
-    border-bottom: 2px solid #fae38c;
-    padding-bottom: 5px;
-    margin-bottom: 15px;
-    color: #333;
 }
