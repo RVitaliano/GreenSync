@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Plataforma - GreenSync</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="cabecalho-amarelo">
+        <div class="linha-superior">
+            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <div class="titulo-branco">PROJETO GREENSYNC</div>
+        </div>
+        <nav class="menu-branco">
+            <a href="index.html">Home</a>
+            <a href="plataforma.html">Plataforma</a>
+            <a href="dispositivo.html">Dispositivo</a>
+            <a href="aplicativo.html">Aplicativo</a>
+        </nav>
+    </header>
+
+    <main class="conteudo">
+        <section>
+            <h2>Arquitetura do Sistema</h2>
+            <p>Toda a lógica (validação, persistência, IA, agendamento de regas) fica no backend. A irrigação por umidade continua no firmware, com histerese, como regra base: a planta não depende da nuvem para sobreviver.</p>
+            
+            <!-- Espaço para o diagrama visual -->
+            <div id="diagrama-arquitetura">
+                <pre>
+ESP32-WROOM ──MQTT/TLS──> EMQX Cloud ──MQTT/TLS──> Backend (FastAPI) ──> Firebase (Firestore) ──> App (Flutter)
+               ▲                                    │   │
+               └──── comandos de rega (MQTT) ───────┘   └──> Redis
+                                                    │
+ESP32-S3 ──HTTPS + X-API-Key──> Backend ────────────┴──> Google Gemini (LLM) + TTS
+         <────── áudio da resposta ─────┘
+                </pre>
+            </div>
+        </section>
+
+        <section>
+            <h2>Rodando o Backend Localmente</h2>
+            <p>Pré-requisitos: Docker, Docker Compose e a chave de serviço do Firebase.</p>
+            <pre><code>
+cd backend
+cp .env.example .env
+# salvar a chave de serviço do Firebase como backend/serviceAccountKey.json
+docker compose up
+            </code></pre>
+            <p>Teste rápido com Mosquitto local:</p>
+            <pre><code>
+docker compose exec mosquitto mosquitto_pub -h localhost -t "greensync/vaso-01/sensores" \
+  -m '{"ph": 6.4, "umidade_solo": 42, "temperatura_ar": 24.1, "umidade_ar": 58, "bomba_ligada": false}'
+            </code></pre>
+        </section>
+    </main>
+</body>
+</html>
