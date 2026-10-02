@@ -22,9 +22,10 @@
     <main class="conteudo">
         <section>
             <h2>Hardware Utilizado</h2>
+            <p>O ecossistema físico do vaso inteligente está sendo implementado de forma modular. Abaixo detalhamos o hardware ativo na fase atual e o escopo planejado:</p>
             <ul>
-                <li><strong>ESP32-WROOM:</strong> Responsável pela leitura dos sensores (DHT22, YL-69, pH), controle da bomba de água e comunicação via MQTT.</li>
-                <li><strong>ESP32-S3:</strong> Responsável pela interface de voz (microfone e alto-falante), comunicando-se via HTTP.</li>
+                <li><strong>Fase Atual (ESP32-WROOM):</strong> Microcontrolador principal ativo no momento. Responsável por ler os sensores ambientais (DHT22 e YL-69). Atualmente, a irrigação é validada utilizando um relé/servomotor para fins de teste. O dispositivo gerencia a comunicação via MQTT com a nuvem.</li>
+                <li><strong>Planejado para o Futuro (ESP32-S3 e Periféricos):</strong> Um segundo microcontrolador será adicionado para lidar exclusivamente com a interação do usuário. Ele controlará a captura de áudio (microfone INMP441), a reprodução de voz e um Display OLED (SSD1306) para exibir as emoções da planta. O sensor de pH e a bomba d'água definitiva também serão integrados nesta etapa.</li>
             </ul>
         </section>
 
