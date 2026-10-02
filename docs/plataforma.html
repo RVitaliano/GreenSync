@@ -19,16 +19,46 @@
         </nav>
     </header>
 
-<main class="conteudo">
+    <main class="conteudo">
         <section>
             <h2>Arquitetura do Sistema</h2>
-            <p>Toda a lógica (validação, persistência, IA, agendamento de regas) fica no backend. A irrigação por umidade continua no firmware, com histerese, como regra base: a planta não depende da nuvem para sobreviver.</p>
-            
-            <!-- Diagrama Visual -->
-            <img src="diagrama arquitetura do projeto.jpeg" alt="Diagrama de Arquitetura do GreenSync" style="width: 100%; border-radius: 8px; margin-top: 15px;">
+            <p>O backend atua como a ponte entre o vaso inteligente e o aplicativo móvel. Toda a lógica de validação, persistência, regras de IA e agendamento de regas fica centralizada nesta camada, garantindo que o hardware (ESP32) foque apenas na leitura e publicação de dados.</p>
+            <img src="diagrama arquitetura do projeto.jpeg" alt="Diagrama de Arquitetura" style="width: 100%; border-radius: 8px; margin-top: 15px; border: 1px solid #ddd;">
         </section>
 
-        <!-- Restante do conteúdo de execução local do backend -->
+        <section>
+            <h2>Stack Tecnológico (Backend)</h2>
+            <ul>
+                <li><strong>FastAPI:</strong> Serve a API HTTP (health check e, futuramente, endpoints <code>/perguntar</code> e <code>/audio</code> para IA) e gerencia o ciclo de vida do MQTT.</li>
+                <li><strong>aiomqtt:</strong> Cliente MQTT assíncrono, responsável pela conexão com o EMQX Cloud via TLS e reconexão automática.</li>
+                <li><strong>Pydantic:</strong> Realiza a validação estrita dos payloads que chegam do firmware (Modelos <code>SensorReading</code> e <code>DeviceStatus</code>).</li>
+                <li><strong>Firebase Admin SDK:</strong> Gerencia as gravações no Firestore utilizando permissões de administrador.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Lógica de Persistência (Firestore)</h2>
+            <p>O backend assina o tópico <code>greensync/+/sensores</code>. Ao receber um payload válido, ele realiza uma gravação em lote (batch write) no Firestore na coleção <code>devices/{deviceId}</code>:</p>
+            <ul>
+                <li><code>leitura_atual</code>: Sobrescrito a cada nova mensagem para garantir que o aplicativo exiba os dados em tempo real.</li>
+                <li><code>historico/{autoId}</code>: Acumula um documento por leitura, alimentando os gráficos históricos do aplicativo.</li>
+            </ul>
+            <p>Mensagens fora do padrão do Pydantic são logadas e descartadas de forma segura, sem interromper o serviço.</p>
+        </section>
+
+        <section>
+            <h2>Execução e Deploy</h2>
+            <p>Para desenvolvimento local, o projeto utiliza <strong>Docker e Docker Compose</strong> para subir a aplicação FastAPI (com hot-reload na porta 8000) e um broker Mosquitto para testes.</p>
+            
+            <div class="terminal">
+<pre><code>cd backend
+cp .env.example .env
+# Salve a chave do Firebase como backend/serviceAccountKey.json
+docker compose up</code></pre>
+            </div>
+
+            <p><strong>Produção (Render):</strong> O deploy será feito via Render. O Dockerfile compila a imagem, e a variável <code>$PORT</code> dinâmica será injetada. A chave do Firebase (<code>serviceAccountKey.json</code>) deve ser configurada estritamente como um <em>Secret File</em> no painel do Render, nunca "commitada" no repositório.</p>
+        </section>
     </main>
 </body>
 </html>
