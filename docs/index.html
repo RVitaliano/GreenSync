@@ -27,9 +27,18 @@
         <img src="banner projeto.jpeg" alt="Banner GreenSync" style="width: 100%; border-radius: 8px; margin-bottom: 20px;">
         
         <section>
-            <h2>Visão Geral</h2>
-            <p>O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla irrigação automática e sincroniza os dados em tempo real com um aplicativo mobile.</p>
-            <p>O vaso lê os sensores, decide quando regar a planta sozinho e envia os dados pra nuvem. Um assistente de voz com personalidade de planta (via Google Gemini) responde perguntas e agenda regas.</p>
+            <h2>Visão Geral (Estado Atual)</h2>
+            <p>O GreenSync é um projeto de vaso inteligente projetado para monitorar dados vitais da planta e automatizar a irrigação. Na etapa atual de desenvolvimento (N1), o protótipo utiliza um ESP32-WROOM para ler sensores de temperatura/umidade do ar (DHT22) e umidade do solo (YL-69), simulando a irrigação e publicando os dados na nuvem via MQTT.</p>
+            <p>Para as próximas fases, o projeto integrará um segundo microcontrolador (ESP32-S3) com display OLED e microfone. Isso habilitará um assistente de voz com personalidade própria (via Google Gemini) capaz de interagir com o usuário e agendar regas, além de um portal Wi-Fi para configuração dinâmica de rede.</p>
+        </section>
+        
+        <section>
+            <h2>Fases do Projeto</h2>
+            <ul>
+                <li><strong>Fase Atual (N1):</strong> Leitura base de sensores (DHT22 e YL-69), acionamento de hardware (simulado via servomotor/relé), comunicação MQTT com broker EMQX e persistência básica.</li>
+                <li><strong>Próximos Passos (Integração IA):</strong> Implementação do ESP32-S3 para áudio, integração com sensor de pH e bomba d'água real, hospedagem do backend em servidor dedicado (Render), display OLED interativo e portal de configuração Wi-Fi.</li>
+                <li><strong>V2 (Expansão):</strong> Conectividade celular via módulo GPRS no ESP32-WROOM, tornando o vaso totalmente independente de redes locais.</li>
+            </ul>
         </section>
     </main>
 
