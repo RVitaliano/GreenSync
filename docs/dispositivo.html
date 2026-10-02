@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Dispositivo IoT - GreenSync</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="cabecalho-amarelo">
+        <div class="linha-superior">
+            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <div class="titulo-branco">PROJETO GREENSYNC</div>
+        </div>
+        <nav class="menu-branco">
+            <a href="index.html">Home</a>
+            <a href="plataforma.html">Plataforma</a>
+            <a href="dispositivo.html">Dispositivo</a>
+            <a href="aplicativo.html">Aplicativo</a>
+        </nav>
+    </header>
+
+    <main class="conteudo">
+        <section>
+            <h2>Hardware Utilizado</h2>
+            <ul>
+                <li><strong>ESP32-WROOM:</strong> Responsável pela leitura dos sensores (DHT22, YL-69, pH), controle da bomba de água e comunicação via MQTT.</li>
+                <li><strong>ESP32-S3:</strong> Responsável pela interface de voz (microfone e alto-falante), comunicando-se via HTTP.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Contratos MQTT (QoS 1)</h2>
+            <p>Tópico de Leituras: <code>greensync/{deviceId}/sensores</code></p>
+            <pre><code>
+{
+  "ph": 6.4,
+  "umidade_solo": 42,
+  "temperatura_ar": 24.1,
+  "umidade_ar": 58,
+  "bomba_ligada": false,
+  "timestamp": 1735000000
+}
+            </code></pre>
+            <p><em>Nota: umidade_ar e timestamp são opcionais. umidade_solo já vem em % (calibrado). Se o DHT22 falhar, o firmware não publica.</em></p>
+            
+            <p>Tópico de Status: <code>greensync/{deviceId}/status</code></p>
+            <pre><code>{"status": "online"} // ou offline via Last Will</code></pre>
+        </section>
+    </main>
+</body>
+</html>
