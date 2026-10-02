@@ -19,39 +19,16 @@
         </nav>
     </header>
 
-    <main class="conteudo">
+<main class="conteudo">
         <section>
             <h2>Arquitetura do Sistema</h2>
             <p>Toda a lógica (validação, persistência, IA, agendamento de regas) fica no backend. A irrigação por umidade continua no firmware, com histerese, como regra base: a planta não depende da nuvem para sobreviver.</p>
             
-            <!-- Espaço para o diagrama visual -->
-            <div id="diagrama-arquitetura">
-                <pre>
-ESP32-WROOM ──MQTT/TLS──> EMQX Cloud ──MQTT/TLS──> Backend (FastAPI) ──> Firebase (Firestore) ──> App (Flutter)
-               ▲                                    │   │
-               └──── comandos de rega (MQTT) ───────┘   └──> Redis
-                                                    │
-ESP32-S3 ──HTTPS + X-API-Key──> Backend ────────────┴──> Google Gemini (LLM) + TTS
-         <────── áudio da resposta ─────┘
-                </pre>
-            </div>
+            <!-- Diagrama Visual -->
+            <img src="diagrama arquitetura do projeto.jpeg" alt="Diagrama de Arquitetura do GreenSync" style="width: 100%; border-radius: 8px; margin-top: 15px;">
         </section>
 
-        <section>
-            <h2>Rodando o Backend Localmente</h2>
-            <p>Pré-requisitos: Docker, Docker Compose e a chave de serviço do Firebase.</p>
-            <pre><code>
-cd backend
-cp .env.example .env
-# salvar a chave de serviço do Firebase como backend/serviceAccountKey.json
-docker compose up
-            </code></pre>
-            <p>Teste rápido com Mosquitto local:</p>
-            <pre><code>
-docker compose exec mosquitto mosquitto_pub -h localhost -t "greensync/vaso-01/sensores" \
-  -m '{"ph": 6.4, "umidade_solo": 42, "temperatura_ar": 24.1, "umidade_ar": 58, "bomba_ligada": false}'
-            </code></pre>
-        </section>
+        <!-- Restante do conteúdo de execução local do backend -->
     </main>
 </body>
 </html>
