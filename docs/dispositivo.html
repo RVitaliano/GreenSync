@@ -46,6 +46,15 @@
             <p>Tópico de Status: <code>greensync/{deviceId}/status</code></p>
             <pre><code>{"status": "online"} // ou offline via Last Will</code></pre>
         </section>
+        <section>
+    <h2>Circuito Eletrónico - V1</h2>
+    <p>Diagrama de ligações focado na leitura de dados vitais da planta e no controlo automático de irrigação.</p>
+    
+    <!-- Lembre-se de colocar o nome exato da imagem que fez o upload -->
+    <img src="circuito.jpeg" alt="Esquema elétrico do GreenSync com relé e sensor de pH" style="width: 100%; border-radius: 8px; border: 1px solid #ddd; margin: 15px 0;">
+    
+    <p><em>Nota técnica: Esta primeira versão do circuito contempla a infraestrutura de hardware principal descrita na Fase V1 do projeto. O sistema utiliza um ESP32-WROOM para processar os dados do sensor de temperatura/humidade (DHT22), humidade do solo (YL-69) e sensor de pH. A atuação da bomba de água é gerida através de um módulo de relé, com os componentes de maior consumo elétrico suportados por uma fonte de alimentação externa de 5V. A integração do hardware de voz (ESP32-S3) será feita em fases posteriores.</em></p>
+</section>
     </main>
 </body>
 </html>
