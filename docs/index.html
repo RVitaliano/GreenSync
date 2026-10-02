@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Projeto GreenSync</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Cabeçalho no padrão da imagem -->
+    <header class="cabecalho-amarelo">
+        <div class="linha-superior">
+            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <div class="titulo-branco">PROJETO GREENSYNC</div>
+        </div>
+        <nav class="menu-branco">
+            <a href="index.html">Home</a>
+            <a href="plataforma.html">Plataforma</a>
+            <a href="dispositivo.html">Dispositivo</a>
+            <a href="aplicativo.html">Aplicativo</a>
+        </nav>
+    </header>
+
+    <!-- Conteúdo da página -->
+    <main class="conteudo">
+        <section>
+            <h2>Visão Geral</h2>
+            <p>O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla irrigação automática e sincroniza os dados em tempo real com um aplicativo mobile.</p>
+            <p>O vaso lê os sensores, decide quando regar a planta sozinho e envia os dados pra nuvem. Um assistente de voz com personalidade de planta (via Google Gemini) responde perguntas e agenda regas.</p>
+        </section>
+        
+        <section>
+            <h2>Fases do Projeto</h2>
+            <ul>
+                <li><strong>V1:</strong> Hardware, sensores, irrigação automática, Wi-Fi → MQTT → backend → Firebase, app e assistente de voz.</li>
+                <li><strong>V2:</strong> Conectividade GPRS no ESP32-WROOM.</li>
+            </ul>
+        </section>
+    </main>
+
+</body>
+</html>
