@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Aplicativo - GreenSync</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="cabecalho-amarelo">
+        <div class="linha-superior">
+            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <div class="titulo-branco">PROJETO GREENSYNC</div>
+        </div>
+        <nav class="menu-branco">
+            <a href="index.html">Home</a>
+            <a href="plataforma.html">Plataforma</a>
+            <a href="dispositivo.html">Dispositivo</a>
+            <a href="aplicativo.html">Aplicativo</a>
+        </nav>
+    </header>
+
+    <main class="conteudo">
+        <section>
+            <h2>Aplicativo Mobile (Flutter)</h2>
+            <p>O aplicativo sincroniza os dados do vaso inteligente em tempo real através do Firebase (Firestore), permitindo o monitoramento do pH, umidade, temperatura e controle da irrigação.</p>
+        </section>
+
+        <section>
+            <h2>Estrutura de Dados (Firestore)</h2>
+            <p>A comunicação Backend ↔ App ocorre através da seguinte estrutura:</p>
+            <pre><code>
+devices/{deviceId}
+  ├── status, last_seen
+  ├── leitura_atual: { ph, umidade_solo, temperatura_ar, umidade_ar, bomba_ligada, updated_at }
+  ├── historico/{autoId}: ph, umidade_solo, temperatura_ar, umidade_ar, bomba_ligada, timestamp
+  └── agendamentos/{id}: executar_em, duracao_s, status, origem, criado_em (planejado)
+            </code></pre>
+        </section>
+    </main>
+</body>
+</html>
