@@ -1,0 +1,12 @@
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+monitor_speed = 115200
+upload_speed = 115200
+upload_port = "SUA_PORTA(COM"N")"
+monitor_port = "SUA_PORTA(COM"N")"
+lib_deps =
+	knolleary/PubSubClient@^2.8
+	adafruit/DHT sensor library@^1.4.6
+	bblanchon/ArduinoJson@^7.0.0

@@ -1,0 +1,171 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <DHT.h>
+#include "config.h"
+
+// ---------- Hardware ----------
+#define DHT_PIN 4
+#define DHT_TYPE DHT22
+#define PINO_BOMBA_SIMULADA 2   // LED da própria placa faz o papel da bomba (relé ainda não existe)
+
+// ---------- Limites de segurança da bomba (valem para qualquer comando) ----------
+#define TEMPO_MAX_BOMBA_MS 10000
+#define INTERVALO_MIN_REGAS_MS 30000
+
+DHT dht(DHT_PIN, DHT_TYPE);
+WiFiClientSecure espClient;       // TLS (porta 8883)
+PubSubClient client(espClient);
+
+// Tópicos do contrato: greensync/{deviceId}/...
+String topicSensores  = String("greensync/") + DEVICE_ID + "/sensores";
+String topicStatus    = String("greensync/") + DEVICE_ID + "/status";
+String topicComandos  = String("greensync/") + DEVICE_ID + "/comandos";
+String clientId       = String("greensync-") + DEVICE_ID;
+
+// ---------- Estado da bomba ----------
+bool bombaLigada = false;
+unsigned long bombaFimMs = 0;
+unsigned long ultimaRegaMs = 0;
+bool jaRegou = false;
+
+void ligarBomba(unsigned long duracaoMs) {
+  digitalWrite(PINO_BOMBA_SIMULADA, HIGH);
+  bombaLigada = true;
+  bombaFimMs = millis() + duracaoMs;
+  ultimaRegaMs = millis();
+  jaRegou = true;
+  Serial.printf("Bomba LIGADA por %lu ms\n", duracaoMs);
+}
+
+void desligarBomba() {
+  digitalWrite(PINO_BOMBA_SIMULADA, LOW);
+  bombaLigada = false;
+  Serial.println("Bomba DESLIGADA");
+}
+
+// ---------- Comandos vindos do backend ----------
+// Payload esperado: {"acao": "regar", "duracao_s": 5, "id": "abc"}
+void onMensagem(char* topic, byte* payload, unsigned int length) {
+  Serial.printf("Comando recebido em %s\n", topic);
+
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, length)) {
+    Serial.println("Comando ignorado: JSON invalido");
+    return;
+  }
+  if (String(doc["acao"] | "") != "regar") {
+    Serial.println("Comando ignorado: acao desconhecida");
+    return;
+  }
+
+  unsigned long duracaoMs = (unsigned long)(doc["duracao_s"] | 0) * 1000UL;
+  if (duracaoMs == 0) {
+    Serial.println("Comando ignorado: duracao_s ausente ou zero");
+    return;
+  }
+  if (duracaoMs > TEMPO_MAX_BOMBA_MS) duracaoMs = TEMPO_MAX_BOMBA_MS;  // o firmware manda no limite
+
+  if (bombaLigada) {
+    Serial.println("Comando ignorado: bomba ja esta ligada");
+    return;
+  }
+  if (jaRegou && millis() - ultimaRegaMs < INTERVALO_MIN_REGAS_MS) {
+    Serial.println("Comando ignorado: intervalo minimo entre regas");
+    return;
+  }
+  ligarBomba(duracaoMs);
+}
+
+// ---------- Conexão MQTT (sem delay: tenta de novo a cada 5 s) ----------
+unsigned long ultimaTentativaMqtt = 0;
+
+void conectarMqtt() {
+  if (client.connected()) return;
+  if (millis() - ultimaTentativaMqtt < 5000 && ultimaTentativaMqtt != 0) return;
+  ultimaTentativaMqtt = millis();
+
+  Serial.print("Conectando ao broker MQTT...");
+  // Last Will: se o ESP cair sem avisar, o broker publica "offline" (retain, QoS 1)
+  bool ok = client.connect(clientId.c_str(), MQTT_USER, MQTT_PASS,
+                           topicStatus.c_str(), 1, true, "{\"status\":\"offline\"}");
+  if (ok) {
+    Serial.println(" conectado!");
+    client.publish(topicStatus.c_str(), "{\"status\":\"online\"}", true);  // retain
+    client.subscribe(topicComandos.c_str(), 1);
+  } else {
+    Serial.printf(" falhou, rc=%d\n", client.state());
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PINO_BOMBA_SIMULADA, OUTPUT);
+  digitalWrite(PINO_BOMBA_SIMULADA, LOW);
+  dht.begin();
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Conectando ao Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi conectado!");
+
+#if MQTT_TLS_INSEGURO
+  Serial.println("*** ATENCAO: TLS sem validar certificado. Use SOMENTE em teste! ***");
+  espClient.setInsecure();
+#else
+  espClient.setCACert(EMQX_CA_CERT);
+#endif
+
+  client.setServer(MQTT_SERVER, MQTT_PORT);
+  client.setCallback(onMensagem);
+  client.setBufferSize(512);
+}
+
+void loop() {
+  conectarMqtt();
+  client.loop();
+
+  // Desliga a bomba quando o tempo acaba (nunca passa de TEMPO_MAX_BOMBA_MS)
+  if (bombaLigada && (long)(millis() - bombaFimMs) >= 0) {
+    desligarBomba();
+  }
+
+  // Publica uma leitura a cada INTERVALO_PUBLICACAO_MS
+  static unsigned long ultimaPublicacao = 0;
+  if (millis() - ultimaPublicacao >= INTERVALO_PUBLICACAO_MS) {
+    ultimaPublicacao = millis();
+
+    float temp = dht.readTemperature();
+    float umidAr = dht.readHumidity();
+
+    // Se o DHT22 falhar, NAO publica (contrato)
+    if (isnan(temp) || isnan(umidAr)) {
+      Serial.println("DHT22 falhou: leitura NAO publicada");
+      return;
+    }
+    if (!client.connected()) {
+      Serial.println("MQTT desconectado: leitura NAO publicada");
+      return;
+    }
+
+    float ph = PH_SIMULADO;          // SIMULADO: sensor de pH ainda nao existe
+    int umidadeSolo = SOLO_SIMULADO; // SIMULADO: YL-69 ainda nao existe
+
+    char payload[200];
+    snprintf(payload, sizeof(payload),
+             "{\"ph\":%.1f,\"umidade_solo\":%d,\"temperatura_ar\":%.1f,\"umidade_ar\":%.0f,\"bomba_ligada\":%s}",
+             ph, umidadeSolo, temp, umidAr, bombaLigada ? "true" : "false");
+
+    if (client.publish(topicSensores.c_str(), payload)) {
+      Serial.printf("Publicado em %s: %s\n", topicSensores.c_str(), payload);
+    } else {
+      Serial.println("Falha ao publicar");
+    }
+  }
+}
