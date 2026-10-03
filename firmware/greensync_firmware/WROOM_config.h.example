@@ -1,0 +1,31 @@
+#pragma once
+// Copie este arquivo para config.h e preencha. O config.h NUNCA vai para o Git.
+
+// Wi-Fi
+#define WIFI_SSID "SEU_WIFI"
+#define WIFI_PASSWORD "SUA_SENHA"
+
+// EMQX Cloud (copie o host do painel do cluster)
+#define MQTT_SERVER "HOST_DO_CLUSTER_EMQX"
+#define MQTT_PORT 8883
+#define MQTT_USER "esp_vaso"
+#define MQTT_PASS "SENHA_DO_USUARIO_MQTT"
+
+// Identificacao do vaso (use "vaso-teste" enquanto estiver testando)
+#define DEVICE_ID "vaso-teste"
+
+// TLS: 1 = nao valida o certificado (SO PARA TESTE). 0 = valida com a CA abaixo.
+#define MQTT_TLS_INSEGURO 1
+
+// Certificado da CA do broker (baixe no painel do EMQX). Usado quando MQTT_TLS_INSEGURO = 0.
+#define EMQX_CA_CERT \
+"-----BEGIN CERTIFICATE-----\n" \
+"COLE_AQUI_O_CERTIFICADO\n" \
+"-----END CERTIFICATE-----\n"
+
+// Intervalo entre publicacoes
+#define INTERVALO_PUBLICACAO_MS 20000
+
+// Valores SIMULADOS enquanto os sensores nao existem
+#define PH_SIMULADO 7.0
+#define SOLO_SIMULADO 50
