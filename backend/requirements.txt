@@ -4,3 +4,5 @@ aiomqtt==2.3.0
 firebase-admin==6.5.0
 pydantic==2.9.2
 pydantic-settings==2.5.2
+pytest==9.1.1
+google-genai==2.8.0
