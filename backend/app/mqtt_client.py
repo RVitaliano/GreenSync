@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import ssl
 
@@ -10,6 +11,31 @@ from app.firebase_client import save_reading, save_status
 from app.models import DeviceStatus, SensorReading
 
 logger = logging.getLogger("greensync.mqtt")
+
+# Conexão ativa com o broker (a mesma que escuta os sensores). Fica None enquanto
+# estiver desconectado; publicar_comando usa isto para enviar comandos ao vaso.
+_cliente: aiomqtt.Client | None = None
+
+
+class MqttIndisponivel(Exception):
+    """Sem conexão com o broker no momento de publicar."""
+
+
+async def publicar_comando(device_id: str, payload: dict) -> None:
+    """Publica um comando em greensync/{device_id}/comandos (QoS 1, sem retain).
+
+    Sem retain de propósito: um comando de rega guardado no broker seria entregue
+    de novo a quem se reconectasse depois, e a bomba ligaria sem ninguém pedir.
+    """
+    cliente = _cliente
+    if cliente is None:
+        raise MqttIndisponivel("sem conexão com o broker MQTT")
+    topico = settings.mqtt_topic_comandos.format(device_id=device_id)
+    try:
+        await cliente.publish(topico, json.dumps(payload), qos=1, retain=False, timeout=5)
+    except aiomqtt.MqttError as exc:
+        raise MqttIndisponivel(str(exc)) from exc
+    logger.info("[%s] comando publicado em %s: %s", device_id, topico, payload)
 
 
 def parse_topic(topic: str) -> tuple[str, str] | None:
@@ -49,6 +75,7 @@ async def handle_message(message: aiomqtt.Message) -> None:
 
 async def run_mqtt_subscriber() -> None:
     """Conecta no broker e reconecta automaticamente se cair."""
+    global _cliente
     while True:
         try:
             async with aiomqtt.Client(
@@ -64,6 +91,7 @@ async def run_mqtt_subscriber() -> None:
                 )
                 await client.subscribe(settings.mqtt_topic_sensores, qos=1)
                 await client.subscribe(settings.mqtt_topic_status, qos=1)
+                _cliente = client
 
                 async for message in client.messages:
                     try:
@@ -74,3 +102,5 @@ async def run_mqtt_subscriber() -> None:
         except aiomqtt.MqttError as exc:
             logger.warning("Sem conexão com o broker (%s). Tentando de novo em 5s...", exc)
             await asyncio.sleep(5)
+        finally:
+            _cliente = None

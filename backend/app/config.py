@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     audio_max_bytes: int = 1_000_000   # ~30 s de WAV 16 kHz mono 16 bits
     audio_max_s: float = 15.0          # pergunta mais longa que isso é recusada
 
+    # --- Rega por voz e agendamento (REQ-FUNC-011 e REQ-FUNC-012) ---
+    # Tópico dos comandos para o vaso; {device_id} é trocado pelo id do dispositivo.
+    mqtt_topic_comandos: str = "greensync/{device_id}/comandos"
+    rega_atraso_max_s: int = 86400     # só agenda para as próximas 24 h
+    rega_duracao_max_s: int = 10       # rega mais longa que isso é recusada
+    rega_duracao_padrao_s: int = 5     # usada quando a pessoa não diz quanto tempo
+    rega_intervalo_min_s: int = 600    # mínimo entre duas regas (10 min)
+    rega_tolerancia_s: int = 300       # atrasou mais que isso (ex.: backend reiniciou)? expira
+    # Horário local do usuário, para "às 15h". Brasil (Brasília) = -3, sem horário de verão.
+    fuso_utc_h: float = -3.0
+
     # --- Personalidade ---
     tom_planta: str = "planta"  # "planta" (divertido) ou "informativo" (mais seco)
 

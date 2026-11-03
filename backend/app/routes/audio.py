@@ -15,6 +15,10 @@ Contrato com o S3 (proposta, a confirmar com o firmware):
   422  áudio/cabeçalho inválido  429  limite atingido (com Retry-After)
   502  Gemini ou voz fora do ar
 
+Rega por voz (REQ-FUNC-011): se a pessoa pedir ("regar daqui a 1 minuto"), o
+backend valida e agenda; a resposta falada já traz a confirmação ou a recusa.
+O S3 não precisa fazer nada de diferente.
+
 Com ?debug=true a resposta também traz X-Ouviu, X-Texto e X-Modelo (texto com
 %-encoding). Ficam desligados por padrão: cabeçalhos compridos estouram o
 buffer do cliente HTTP do ESP32, e o que a pessoa falou é dado pessoal.
@@ -27,6 +31,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 
+from app.agenda.servico import tratar_acao
 from app.ai.audio import AudioInvalido, validar_audio
 from app.ai.resiliencia import IAError
 from app.ai.responder import responder_audio
@@ -124,6 +129,11 @@ async def audio(
     except IAError as e:
         log.error("[%s] IA falhou: %s", x_device_id, e)
         raise HTTPException(status_code=502, detail="assistente indisponível")
+
+    # Pedido de rega por voz: o backend valida e troca a frase do modelo pela oficial.
+    rega = await tratar_acao(r.get("acao"), r["pergunta_ouvida"], x_device_id, leitura, r["estado"], "voz")
+    if rega:
+        r["texto"] = rega["fala"]
     t_llm = time.monotonic() - t0
 
     t0 = time.monotonic()
@@ -136,8 +146,9 @@ async def audio(
 
     tela = decidir_tela(r["pergunta_ouvida"])
     # Não registramos o que a pessoa falou (dado pessoal); só tamanhos e tempos.
-    log.info("[%s] áudio %d B -> voz %d B | entender+responder %.1fs, voz %.1fs | tela=%s | %s, %s",
-             x_device_id, len(corpo), len(wav), t_llm, t_tts, tela, r["modelo"], modelo_tts)
+    log.info("[%s] áudio %d B -> voz %d B | entender+responder %.1fs, voz %.1fs | tela=%s | rega=%s | %s, %s",
+             x_device_id, len(corpo), len(wav), t_llm, t_tts, tela,
+             rega["resultado"] if rega else "-", r["modelo"], modelo_tts)
 
     cabecalhos = {
         "X-Tela": tela,

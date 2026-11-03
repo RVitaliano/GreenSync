@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app.agenda.servico import tratar_acao
 from app.ai.responder import IAError, responder
 from app.ai.tela import decidir_tela
 from app.firebase_client import ler_leitura_atual
@@ -41,9 +42,14 @@ async def perguntar(body: PerguntaIn, x_api_key: str = Header(default="")):
         log.error("IA falhou: %s", e)
         raise HTTPException(status_code=502, detail="assistente indisponível")
 
+    # Pedido de rega/cancelamento: o backend valida e responde com a frase oficial.
+    rega = await tratar_acao(r.get("acao"), body.pergunta, body.device_id, leitura, r["estado"], "texto")
+
     return {
-        "texto": r["texto"],
+        "texto": rega["fala"] if rega else r["texto"],
         "estado": r["estado"],
         "tela": decidir_tela(body.pergunta),
         "modelo": r["modelo"],
+        # None = não houve pedido de rega. Senão: resultado (agendada, recusada, cancelada...) e id.
+        "rega": {"resultado": rega["resultado"], "id": rega["id"]} if rega else None,
     }

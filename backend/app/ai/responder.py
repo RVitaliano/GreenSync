@@ -3,9 +3,14 @@
 Todo o resto do backend chama `responder(...)` (texto) ou `responder_audio(...)`
 (pergunta falada). Se um dia trocarmos Gemini por Groq, só o INTERIOR destas
 funções muda. Retry, timeout e modelo reserva ficam em `resiliencia.py`.
+
+As duas devolvem, além da resposta, `acao`: o pedido de rega/cancelamento que o
+modelo entendeu (ou None). O modelo só propõe; quem valida e executa é o
+backend (app/agenda).
 """
 import json
 import logging
+from typing import Literal, Optional
 
 from google import genai
 from google.genai import types
@@ -55,37 +60,61 @@ async def _gerar(contents, config, timeout_s: float) -> tuple[str, str]:
     return await tentar_modelos(_modelos(), chamar, extrair, timeout_s, "Gemini")
 
 
-async def responder(pergunta: str, leitura: dict | None) -> dict:
-    """Responde `pergunta` (texto) como a planta, com base na `leitura` atual.
+# ------------------------------------------------------------ saída em JSON ----
 
-    Devolve {"texto": str, "estado": {...}, "modelo": str}.
-    Levanta IAError se todos os modelos falharem.
-    """
-    # Estado da planta + se o dado ainda vale como "agora" (vaso offline / leitura velha).
-    estado = avaliar_estado(leitura)
-    config = types.GenerateContentConfig(
-        system_instruction=montar_system_prompt(leitura, estado),
-        temperature=0.7,
-        # Sem max_output_tokens de propósito: em modelos com "thinking",
-        # um limite baixo pode consumir tudo no raciocínio e vir vazio.
-    )
-    texto, modelo = await _gerar(pergunta, config, settings.gemini_timeout_s)
-    return {"texto": texto, "estado": estado, "modelo": modelo}
+# Atenção: os campos opcionais abaixo ficam SEM valor padrão de propósito (o schema
+# do Gemini não aceita `default`). As docstrings das classes são enviadas ao modelo.
+class AcaoRega(BaseModel):
+    """Pedido de rega ou de cancelamento feito pela pessoa."""
+    tipo: Literal["nenhuma", "regar", "cancelar"]
+    daqui_a_s: Optional[int]
+    as_hora: Optional[str]
+    duracao_s: Optional[int]
 
 
-# ---------------------------------------------------------------- áudio ----
+class SaidaTexto(BaseModel):
+    """Formato que pedimos ao Gemini quando a pergunta chega em texto."""
+    resposta: str
+    acao: AcaoRega
+
 
 class SaidaAudio(BaseModel):
     """Formato que pedimos ao Gemini quando a pergunta chega em áudio."""
     pergunta_ouvida: str
     resposta: str
+    acao: AcaoRega
 
 
-def ler_saida_audio(bruto: str) -> tuple[str, str]:
-    """Extrai (pergunta_ouvida, resposta) do JSON devolvido pelo Gemini.
+def _inteiro(valor) -> int | None:
+    """Número inteiro, ou None se vier outra coisa (texto, bool, nulo...)."""
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, float) and valor.is_integer():
+        return int(valor)
+    return None
+
+
+def _ler_acao(bruta) -> dict | None:
+    """Pedido de rega em dicionário limpo, ou None se não houver pedido (ou vier torto)."""
+    if not isinstance(bruta, dict) or bruta.get("tipo") not in ("regar", "cancelar"):
+        return None
+    hora = bruta.get("as_hora")
+    return {
+        "tipo": bruta["tipo"],
+        "daqui_a_s": _inteiro(bruta.get("daqui_a_s")),
+        "as_hora": hora.strip() if isinstance(hora, str) and hora.strip() else None,
+        "duracao_s": _inteiro(bruta.get("duracao_s")),
+    }
+
+
+def ler_saida(bruto: str) -> tuple[str, str, dict | None]:
+    """Extrai (pergunta_ouvida, resposta, acao) do JSON devolvido pelo Gemini.
 
     Tolera cerca de markdown (```json) e, se o modelo ignorar o JSON e devolver
-    só texto, usa esse texto como resposta (sem pergunta ouvida).
+    só texto, usa esse texto como resposta, sem pergunta ouvida e SEM ação:
+    na dúvida, a bomba não é acionada.
     """
     texto = bruto.strip()
     if texto.startswith("```"):
@@ -96,21 +125,49 @@ def ler_saida_audio(bruto: str) -> tuple[str, str]:
     try:
         dados = json.loads(texto)
     except ValueError:
-        return "", bruto.strip()
+        return "", bruto.strip(), None
     if not isinstance(dados, dict):
-        return "", bruto.strip()
+        return "", bruto.strip(), None
     pergunta = str(dados.get("pergunta_ouvida") or "").strip()
     resposta = str(dados.get("resposta") or "").strip()
-    return pergunta, resposta
+    return pergunta, resposta, _ler_acao(dados.get("acao"))
 
+
+# ------------------------------------------------------------------ texto -----
+
+async def responder(pergunta: str, leitura: dict | None) -> dict:
+    """Responde `pergunta` (texto) como a planta, com base na `leitura` atual.
+
+    Devolve {"texto", "acao", "estado", "modelo"}; `acao` é o pedido de rega
+    entendido (dict) ou None. Levanta IAError se todos os modelos falharem.
+    """
+    # Estado da planta + se o dado ainda vale como "agora" (vaso offline / leitura velha).
+    estado = avaliar_estado(leitura)
+    config = types.GenerateContentConfig(
+        system_instruction=montar_system_prompt(leitura, estado),
+        temperature=0.7,
+        response_mime_type="application/json",
+        response_schema=SaidaTexto,
+        # Sem max_output_tokens de propósito: em modelos com "thinking",
+        # um limite baixo pode consumir tudo no raciocínio e vir vazio.
+    )
+    bruto, modelo = await _gerar(pergunta, config, settings.gemini_timeout_s)
+
+    _, texto, acao = ler_saida(bruto)
+    if not texto:
+        raise IAError(f"{modelo}: resposta vazia")
+    return {"texto": texto, "acao": acao, "estado": estado, "modelo": modelo}
+
+
+# ------------------------------------------------------------------ áudio -----
 
 async def responder_audio(audio: bytes, mime: str, leitura: dict | None) -> dict:
     """Entende uma pergunta FALADA e responde como a planta (ADR-018, camada 2).
 
-    O Gemini ouve o áudio direto (sem STT separado) e devolve dois campos:
-    o que ouviu (usado para decidir a tela e para o log) e a resposta.
+    O Gemini ouve o áudio direto (sem STT separado) e devolve o que ouviu, a
+    resposta e o pedido de rega, se houver.
 
-    Devolve {"texto", "pergunta_ouvida", "estado", "modelo"}.
+    Devolve {"texto", "pergunta_ouvida", "acao", "estado", "modelo"}.
     Levanta IAError se todos os modelos falharem ou se a resposta vier vazia.
     """
     estado = avaliar_estado(leitura)
@@ -126,7 +183,9 @@ async def responder_audio(audio: bytes, mime: str, leitura: dict | None) -> dict
     ]
     bruto, modelo = await _gerar(contents, config, settings.gemini_timeout_audio_s)
 
-    pergunta, texto = ler_saida_audio(bruto)
+    pergunta, texto, acao = ler_saida(bruto)
     if not texto:
         raise IAError(f"{modelo}: resposta vazia")
-    return {"texto": texto, "pergunta_ouvida": pergunta, "estado": estado, "modelo": modelo}
+    if not pergunta:
+        acao = None   # sem fala transcrita não existe pedido: nunca age sobre ruído/silêncio
+    return {"texto": texto, "pergunta_ouvida": pergunta, "acao": acao, "estado": estado, "modelo": modelo}

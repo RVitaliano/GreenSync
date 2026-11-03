@@ -35,6 +35,7 @@ def client(monkeypatch):
         return {
             "texto": "Estou com sede.",
             "pergunta_ouvida": chamadas.get("ouviu", "Como você está?"),
+            "acao": chamadas.get("acao"),
             "estado": chamadas.get("estado", {"estado": "atencao", "problemas": ["solo_seco"],
                                                "dados": "atuais", "idade_s": 3, "offline": False}),
             "modelo": "modelo-falso",
@@ -48,10 +49,16 @@ def client(monkeypatch):
         chamadas["limite_chave"] = chave
         return chamadas.get("espera")
 
+    async def rega_falsa(acao, fala_usuario, device_id, leitura, estado, origem):
+        chamadas["rega"] = {"acao": acao, "fala_usuario": fala_usuario, "device_id": device_id,
+                            "origem": origem}
+        return chamadas.get("rega_resultado")   # None = não houve pedido de rega
+
     monkeypatch.setattr(rota, "ler_leitura_atual", leitura_falsa)
     monkeypatch.setattr(rota, "responder_audio", responder_falso)
     monkeypatch.setattr(rota, "sintetizar", voz_falsa)
     monkeypatch.setattr(rota, "verificar_limite", limite_falso)
+    monkeypatch.setattr(rota, "tratar_acao", rega_falsa)
     monkeypatch.setattr(settings, "api_key", "segredo")
 
     app = FastAPI()
@@ -242,3 +249,52 @@ def test_voz_fora_do_ar_da_502(client, monkeypatch):
     r = post(client)
     assert r.status_code == 502
     assert r.json()["detail"] == "voz indisponível"
+
+
+# ---------- rega por voz (REQ-FUNC-011) ----------
+
+PEDIDO = {"tipo": "regar", "daqui_a_s": 60, "as_hora": None, "duracao_s": None}
+
+
+def test_rega_por_voz_fala_a_confirmacao_oficial(client):
+    client.chamadas["ouviu"] = "Rega daqui a um minuto"
+    client.chamadas["acao"] = PEDIDO
+    client.chamadas["rega_resultado"] = {"fala": "Combinado, vou regar daqui a 1 minuto por 5 segundos.",
+                                         "resultado": "agendada", "id": "ag1"}
+    r = post(client)
+    assert r.status_code == 200
+    # o que vai para a síntese de voz é a frase do backend, não a do modelo
+    assert client.chamadas["texto_falado"] == "Combinado, vou regar daqui a 1 minuto por 5 segundos."
+    assert client.chamadas["rega"] == {"acao": PEDIDO, "fala_usuario": "Rega daqui a um minuto",
+                                       "device_id": "vaso-01", "origem": "voz"}
+
+
+def test_rega_recusada_por_voz_fala_a_recusa(client):
+    client.chamadas["ouviu"] = "Rega agora"
+    client.chamadas["acao"] = PEDIDO
+    client.chamadas["rega_resultado"] = {"fala": "Meu solo já está encharcado, melhor não regar agora.",
+                                         "resultado": "recusada", "id": None}
+    assert post(client).status_code == 200
+    assert client.chamadas["texto_falado"].startswith("Meu solo já está encharcado")
+
+
+def test_sem_pedido_de_rega_fala_a_resposta_do_modelo(client):
+    post(client)
+    assert client.chamadas["texto_falado"] == "Estou com sede."
+
+
+def test_limite_estourado_nao_trata_rega_por_voz(client):
+    client.chamadas["espera"] = 30
+    client.chamadas["acao"] = PEDIDO
+    post(client)
+    assert "rega" not in client.chamadas
+
+
+def test_debug_mostra_a_frase_efetivamente_falada(client):
+    # X-Texto no debug traz a frase que foi para a voz (a oficial da rega, não a do modelo)
+    client.chamadas["ouviu"] = "Rega agora"
+    client.chamadas["acao"] = PEDIDO
+    client.chamadas["rega_resultado"] = {"fala": "Pode deixar, vou me regar agora por 5 segundos.",
+                                         "resultado": "agendada", "id": "ag1"}
+    r = post(client, url="/audio?debug=true")
+    assert unquote(r.headers["X-Texto"]) == "Pode deixar, vou me regar agora por 5 segundos."

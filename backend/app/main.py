@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.agenda.servico import agendador
 from app.config import settings
 from app.firebase_client import init_firebase
 from app.mqtt_client import run_mqtt_subscriber
@@ -21,7 +22,13 @@ async def lifespan(app: FastAPI):
     if not settings.redis_url:
         logger.warning("REDIS_URL vazia: o limite de perguntas está DESLIGADO")
     task = asyncio.create_task(run_mqtt_subscriber())
+    try:
+        await agendador.iniciar()   # recarrega as regas pendentes (REQ-FUNC-012)
+    except Exception:
+        # Sem Firestore agora, o backend sobe mesmo assim (sensores e perguntas seguem).
+        logger.exception("Não consegui recarregar os agendamentos de rega")
     yield
+    await agendador.parar()
     task.cancel()
     await close_redis()
 

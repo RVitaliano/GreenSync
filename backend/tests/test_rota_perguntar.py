@@ -29,9 +29,15 @@ def client(monkeypatch):
         chamadas["limite_chave"] = chave
         return chamadas.get("espera")  # None = pode seguir; número = segundos de espera
 
+    async def rega_falsa(acao, fala_usuario, device_id, leitura, estado, origem):
+        chamadas["rega"] = {"acao": acao, "fala_usuario": fala_usuario, "device_id": device_id,
+                            "origem": origem}
+        return chamadas.get("rega_resultado")   # None = não houve pedido de rega
+
     monkeypatch.setattr(rota, "ler_leitura_atual", leitura_falsa)
     monkeypatch.setattr(rota, "responder", responder_falso)
     monkeypatch.setattr(rota, "verificar_limite", limite_falso)
+    monkeypatch.setattr(rota, "tratar_acao", rega_falsa)
     monkeypatch.setattr(settings, "api_key", "segredo")
 
     app = FastAPI()
@@ -56,6 +62,7 @@ def test_resposta_ok(client):
     assert client.chamadas["device_id"] == "vaso-01"
     assert client.chamadas["leitura"] == LEITURA
     assert client.chamadas["limite_chave"] == "segredo"
+    assert corpo["rega"] is None                # sem pedido de rega
 
 
 def test_chave_errada_da_401(client):
@@ -112,3 +119,33 @@ def test_ia_fora_do_ar_da_502(client, monkeypatch):
     r = post(client)
     assert r.status_code == 502
     assert r.json()["detail"] == "assistente indisponível"
+
+
+# ---------- rega por voz/texto (REQ-FUNC-011) ----------
+
+def test_pedido_de_rega_troca_a_frase_pela_oficial(client):
+    client.chamadas["rega_resultado"] = {"fala": "Combinado, vou regar daqui a 10 minutos por 5 segundos.",
+                                         "resultado": "agendada", "id": "ag1"}
+    r = post(client, pergunta="Rega daqui a 10 minutos")
+    corpo = r.json()
+    assert r.status_code == 200
+    assert corpo["texto"] == "Combinado, vou regar daqui a 10 minutos por 5 segundos."
+    assert corpo["rega"] == {"resultado": "agendada", "id": "ag1"}
+    # o serviço recebeu o que a pessoa escreveu (para a trava) e a origem
+    assert client.chamadas["rega"]["fala_usuario"] == "Rega daqui a 10 minutos"
+    assert client.chamadas["rega"]["device_id"] == "vaso-01"
+    assert client.chamadas["rega"]["origem"] == "texto"
+
+
+def test_rega_recusada_tambem_vira_a_frase_falada(client):
+    client.chamadas["rega_resultado"] = {"fala": "Não consigo regar agora porque o vaso está desconectado.",
+                                         "resultado": "recusada", "id": None}
+    corpo = post(client, pergunta="Rega agora").json()
+    assert corpo["texto"].startswith("Não consigo regar")
+    assert corpo["rega"]["resultado"] == "recusada"
+
+
+def test_limite_estourado_nao_trata_rega(client):
+    client.chamadas["espera"] = 30
+    post(client, pergunta="Rega agora")
+    assert "rega" not in client.chamadas        # 429 antes de qualquer ação
