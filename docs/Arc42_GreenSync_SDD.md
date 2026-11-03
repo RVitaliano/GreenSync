@@ -1,6 +1,6 @@
 # Arc42 — Documento de Arquitetura de Software (SDD) — GreenSync
 
-> **Versão 0.3 — 21/09/2026.** Atualizado com as decisões registradas nas ADR-014 a ADR-022. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
+> **Versão 0.5 — 03/11/2026.** Atualizado com o backend implementado: contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
 
 ---
 
@@ -10,7 +10,7 @@
 
 O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla irrigação automática, sincroniza dados em tempo real com um aplicativo mobile e responde perguntas faladas sobre a planta. O assistente "fala como a planta" (primeira pessoa, com base nos dados reais dos sensores) e também pode agendar regas por comando de voz, sempre com validação no backend e limites no firmware.
 
-O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, comunicação via MQTT) e um ESP32-S3 (voz, comunicação via HTTP com o backend). Ver o documento SRS — Requisitos para a especificação completa e verificável.
+O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, comunicação via MQTT) e um ESP32-S3 (voz e display, comunicação via HTTP com o backend). Ver o documento SRS — Requisitos para a especificação completa e verificável.
 
 ## 1.2 Quality Goals
 
@@ -36,7 +36,7 @@ O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, com
 # 2. Architecture Constraints
 
 - Protocolo de comunicação entre o dispositivo de sensores e a nuvem deve ser MQTT (exigência da disciplina); broker **EMQX Cloud** (ADR-014).
-- Dois microcontroladores: **ESP32-WROOM** (sensores, bomba) e **ESP32-S3** (voz) (ADR-016).
+- Dois microcontroladores: **ESP32-WROOM** (sensores, bomba) e **ESP32-S3** (voz e display) (ADR-016, ADR-023).
 - Backend em Python + FastAPI, em **processo único** com `async`/`await`, **sem Celery** (ADR-013, ADR-015).
 - **Redis** presente na arquitetura, por exigência do professor; usos definidos na ADR-015.
 - Aplicativo em Flutter.
@@ -52,11 +52,11 @@ O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, com
 
 ## 3.1 Business Context
 
-O usuário final interage com o aplicativo mobile, com o "rosto" exibido no display do vaso e, por voz, com o assistente ("planta que fala"). Não há interação direta do usuário com o backend, o broker MQTT, o Redis ou o Firebase — esses são componentes internos, invisíveis ao usuário final.
+O usuário final interage com o aplicativo mobile, com o "rosto" exibido no display do vaso (que alterna para os dados dos sensores ao ser feita uma pergunta, ver ADR-023) e, por voz, com o assistente ("planta que fala"). Não há interação direta do usuário com o backend, o broker MQTT, o Redis ou o Firebase — esses são componentes internos, invisíveis ao usuário final.
 
 ```
 Usuário ──(usa)──> App (Flutter)
-Usuário ──(observa)──> Vaso GreenSync (display OLED)
+Usuário ──(observa)──> Vaso GreenSync (display OLED, no ESP32-S3)
 Usuário ──(fala com)──> Vaso GreenSync (ESP32-S3: microfone e alto-falante)
 ```
 
@@ -68,7 +68,7 @@ ESP32-WROOM ──MQTT/TLS──> EMQX Cloud ──MQTT/TLS──> Backend (Fast
   bomba)         └──── comandos de rega (MQTT) ───────┘   └──> Redis (contexto, limite de perguntas)
                                                        │
 ESP32-S3 ──HTTPS + X-API-Key──> Backend ──────────────┴──> Google Gemini (LLM / áudio de entrada)
- (voz)   <────── áudio da resposta ─────┘                   TTS (provedor a definir)
+ (voz, display)   <─── áudio da resposta + estado da tela ───┘   Gemini TTS (voz)
 ```
 
 Os dois ESPs pertencem ao mesmo vaso lógico (`deviceId`, ex.: `vaso-01`), e o backend é o único ponto que os conecta. Na V2, o WROOM pode usar um módulo GPRS em vez de Wi-Fi como camada de rede subjacente ao MQTT; o S3 permanece em Wi-Fi (o áudio é pesado para dados móveis).
@@ -77,7 +77,7 @@ Os dois ESPs pertencem ao mesmo vaso lógico (`deviceId`, ex.: `vaso-01`), e o b
 
 # 4. Solution Strategy
 
-A estratégia central é manter os firmwares simples e concentrar a lógica no backend. O **WROOM** só lê sensores, controla a bomba e fala MQTT; o **S3** só captura e reproduz áudio e fala HTTP. Validação, persistência, orquestração de IA, agendamento e decisão de atuação ficam no backend, o que desacopla as frentes de hardware das mudanças na nuvem.
+A estratégia central é manter os firmwares simples e concentrar a lógica no backend. O **WROOM** só lê sensores, controla a bomba e fala MQTT; o **S3** só captura e reproduz áudio, executa a troca de tela do display e fala HTTP. Validação, persistência, orquestração de IA, agendamento, decisão de atuação e decisão do que o display mostra ficam no backend, o que desacopla as frentes de hardware das mudanças na nuvem.
 
 Decisões que sustentam essa estratégia:
 
@@ -85,6 +85,7 @@ Decisões que sustentam essa estratégia:
 - **HTTP para áudio**: áudio é grande demais para o MQTT, que é feito para mensagens pequenas (ADR-017).
 - **A irrigação por umidade continua no firmware**, com histerese, como regra base. Voz e agenda são camadas por cima — a planta não depende da nuvem para sobreviver.
 - **Processo único** (uvicorn) com `async`/`await`, sem workers: a chamada ao LLM roda dentro da requisição e as regas agendadas viram tarefas `asyncio` persistidas no Firestore (ADR-015, ADR-021).
+- **Display junto com a voz, no mesmo dispositivo (S3)**: a troca de tela acontece no mesmo momento em que o assistente responde, então fica no mesmo HTTP de áudio em vez de depender de uma segunda via de comunicação para sincronizar os dois ESPs (ADR-023).
 - **Construção em camadas**: cada peça é validada isoladamente (Docker → MQTT → validação → Firestore → Redis → IA em texto → áudio) antes de a próxima ser adicionada.
 
 ---
@@ -101,17 +102,17 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 
 ### Firmware WROOM (ESP32-WROOM)
 
-- Purpose/Responsibility: ler sensores (pH, umidade do solo, temperatura e umidade do ar), controlar a bomba d'água, publicar leituras e status via MQTT, assinar o tópico de comandos de rega, aplicar limite de tempo máximo de bomba ligada, e permitir configurar o Wi-Fi sem regravar (portal de configuração, ADR-022). O display OLED com o "rosto" também está previsto no firmware; **[A DEFINIR]** em qual dos dois ESPs.
+- Purpose/Responsibility: ler sensores (pH, umidade do solo, temperatura e umidade do ar), controlar a bomba d'água, publicar leituras e status via MQTT, assinar o tópico de comandos de rega, aplicar limite de tempo máximo de bomba ligada, e permitir configurar o Wi-Fi sem regravar (portal de configuração, ADR-022). Não possui display — o WROOM não tem indicação visual local (ADR-023).
 - Interface(s): MQTT sobre TLS (publisher e assinante).
 - Fulfilled Requirements: REQ-FUNC-001, REQ-FUNC-002, REQ-FUNC-003, REQ-FUNC-007 (lado do dispositivo), REQ-FUNC-010 (V2), REQ-FUNC-011 (execução), REQ-FUNC-013.
 - Open Issues/Problems/Risks: confiabilidade da sonda de pH e desgaste do sensor de solo resistivo (Seção 11); lógica não bloqueante para conviver com a conexão MQTT persistente.
 
 ### Firmware S3 (ESP32-S3)
 
-- Purpose/Responsibility: capturar o áudio da pergunta (microfone INMP441), enviá-lo ao backend por HTTP, reproduzir o áudio da resposta no alto-falante, e oferecer mute físico do microfone. Também precisa do provisionamento de Wi-Fi.
+- Purpose/Responsibility: capturar o áudio da pergunta (microfone INMP441), enviá-lo ao backend por HTTP, reproduzir o áudio da resposta no alto-falante, oferecer mute físico do microfone, e controlar o display OLED (SSD1306) — por padrão mostrando uma carinha que representa a personalidade da planta (ADR-021) e trocando temporariamente para os dados dos sensores quando o backend indica, ao final de uma pergunta por voz (ADR-023, REQ-FUNC-016). O firmware do S3 só executa a troca de tela; não decide sozinho quando trocar. Também precisa do provisionamento de Wi-Fi.
 - Interface(s): HTTPS para o backend, com `X-API-Key` (Seção 8.4).
-- Fulfilled Requirements: REQ-FUNC-008, REQ-FUNC-009, REQ-FUNC-013, REQ-FUNC-014 (lado do cliente).
-- Open Issues/Problems/Risks: qualidade do áudio (I2S), formato do áudio enviado e forma de acionamento (botão "falar" ou wake-word) **[A DEFINIR]**.
+- Fulfilled Requirements: REQ-FUNC-008, REQ-FUNC-009, REQ-FUNC-013, REQ-FUNC-014 (lado do cliente), REQ-FUNC-016.
+- Open Issues/Problems/Risks: qualidade do áudio (I2S), formato do áudio enviado e forma de acionamento (botão "falar" ou wake-word) **[A DEFINIR]**; o formato do áudio enviado e o estado da tela já estão definidos no backend (Seção 8.4), falta o S3 implementar; o áudio de resposta tem cerca de 350 a 380 KB (24 kHz), o que exige conferir a memória do S3 (Seção 11).
 
 ### Broker MQTT (EMQX Cloud)
 
@@ -122,9 +123,9 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 
 ### Backend (Python + FastAPI, Render)
 
-- Purpose/Responsibility: assinar os tópicos MQTT, validar e gravar dados no Firestore; expor os endpoints de IA (`/perguntar` em texto, `/audio`); orquestrar Gemini e TTS; validar e agendar regas; publicar comandos MQTT.
-- Interface(s): cliente MQTT (assinante e publisher); SDK Admin do Firebase; API do Google Gemini; TTS **[A DEFINIR]**; Redis; HTTP (FastAPI) para o S3 e, se necessário, para o app.
-- Fulfilled Requirements: REQ-FUNC-004, REQ-FUNC-007, REQ-FUNC-008, REQ-FUNC-011, REQ-FUNC-012, REQ-FUNC-014, REQ-FUNC-015.
+- Purpose/Responsibility: assinar os tópicos MQTT, validar e gravar dados no Firestore; expor os endpoints de IA (`/perguntar` em texto, `/audio`); orquestrar Gemini e TTS; validar e agendar regas; publicar comandos MQTT; decidir o que o display do S3 deve mostrar (carinha ou dados dos sensores) a cada resposta de voz (ADR-023).
+- Interface(s): cliente MQTT (assinante e publisher); SDK Admin do Firebase; API do Google Gemini (entendimento do áudio e TTS); Redis; HTTP (FastAPI) para o S3 e, se necessário, para o app.
+- Fulfilled Requirements: REQ-FUNC-004, REQ-FUNC-007, REQ-FUNC-008, REQ-FUNC-011, REQ-FUNC-012, REQ-FUNC-014, REQ-FUNC-015, REQ-FUNC-016.
 - Open Issues/Problems/Risks: memória do plano Starter (512 MB) com API, assinante MQTT e IA no mesmo processo; instância única obrigatória (Seção 7).
 
 ### Redis
@@ -132,7 +133,7 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 - Purpose/Responsibility: contexto curto da conversa por dispositivo (com expiração) e limite de perguntas por chave de API. Uso como cache da última leitura é opcional.
 - Interface(s): protocolo Redis, acessado só pelo backend, via `REDIS_URL`.
 - Fulfilled Requirements: REQ-FUNC-015 (e apoio ao REQ-FUNC-008).
-- Open Issues/Problems/Risks: no plano gratuito do Render, o Key Value (se disponível) é só em memória e perde dados ao reiniciar — aceito, pois o conteúdo é descartável. Expectativa exata do professor sobre o uso do Redis **[A DEFINIR]**.
+- Open Issues/Problems/Risks: hoje o Redis só guarda o contador do limite de perguntas; o contexto curto da conversa ainda não foi implementado (opcional); no plano gratuito do Render, o Key Value (se disponível) é só em memória e perde dados ao reiniciar — aceito, pois o conteúdo é descartável. Expectativa exata do professor sobre o uso do Redis **[A DEFINIR]**.
 
 ### Firebase (Firestore)
 
@@ -156,7 +157,7 @@ Estrutura de coleções e documentos que o backend escreve e o app lê. Ver Seç
 
 ### Name interface 3 — API HTTP de áudio (S3 ↔ Backend)
 
-Contrato de endpoint, cabeçalhos e formato de áudio entre o S3 e o backend. Ver Seção 8.4.
+Contrato de endpoint, cabeçalhos e formato de áudio entre o S3 e o backend, incluindo o campo de estado da tela. Ver Seção 8.4.
 
 ## 5.2 Level 2
 
@@ -166,21 +167,28 @@ Módulos internos: leitura de sensores (com calibração do sensor de solo e des
 
 ### White Box: Firmware S3
 
-Módulos internos: captura de áudio (I2S), botão de falar e mute, cliente HTTP, reprodução de áudio (I2S), provisionamento de Wi-Fi.
+Módulos internos: captura de áudio (I2S), botão de falar e mute, cliente HTTP, reprodução de áudio (I2S), controle do display OLED (carinha/dados, ADR-023), provisionamento de Wi-Fi.
 
 ### White Box: Backend
 
 | Módulo | Responsabilidade | Estado |
 |---|---|---|
-| `config.py` | Variáveis de ambiente (pydantic-settings) | Implementado |
+| `config.py` | Variáveis de ambiente (pydantic-settings): MQTT, Firebase, Gemini, voz, limiares, rega e Redis | Implementado |
 | `models.py` | Validação dos payloads MQTT (`SensorReading`, `DeviceStatus`) | Implementado |
-| `mqtt_client.py` | Assinante MQTT assíncrono, reconexão, roteamento e descarte de payload inválido | Implementado |
-| `firebase_client.py` | Gravação da leitura atual + histórico e do status, em lote (batch) | Implementado |
-| `main.py` | FastAPI, `lifespan` (inicia Firebase e o assinante MQTT) | Implementado |
-| Redis (cliente) | Contexto de conversa e limite por chave | Planejado |
-| `ai/` | `responder(audio, leitura)`, prompt da planta, cálculo do estado, ferramentas (function calling) | Planejado |
-| Rotas HTTP | `POST /perguntar` (texto) e `POST /audio`, com `X-API-Key` | Planejado |
-| Agendamentos | Validação, tarefas `asyncio`, persistência no Firestore, publicação do comando MQTT | Planejado |
+| `mqtt_client.py` | Assinante MQTT assíncrono, reconexão, roteamento e descarte de payload inválido; `publicar_comando` (QoS 1, sem retain) pela mesma conexão | Implementado |
+| `firebase_client.py` | Gravação da leitura atual + histórico e do status, em lote (batch); leitura da leitura atual junto com o status do vaso | Implementado |
+| `main.py` | FastAPI, `lifespan` (Firebase, assinante MQTT, agendador, Redis) | Implementado |
+| `redis_client.py`, `limite.py` | Conexão com o Redis e limite de perguntas por chave de API (janela fixa) | Implementado |
+| `seguranca.py` | Validação da `X-API-Key` (tempo constante) e do `device_id` | Implementado |
+| `ai/estado.py` | Estado da planta (limiares) e frescor dos dados (online/offline, leitura velha) | Implementado |
+| `ai/prompt.py` | Prompt da personalidade da planta com os dados reais, o estado e as regras do pedido de rega | Implementado |
+| `ai/responder.py`, `ai/resiliencia.py` | Única porta para o Gemini (`responder`, `responder_audio`), saída JSON com resposta e pedido de rega, retry e modelo reserva | Implementado |
+| `ai/audio.py`, `ai/voz.py` | Validação e medição do áudio recebido; TTS do Gemini (WAV) | Implementado |
+| `ai/tela.py` | Decisão do estado da tela (`rosto` ou `dados`, ADR-023) | Implementado |
+| `routes/ia.py`, `routes/audio.py` | `POST /perguntar` (texto) e `POST /audio`, com `X-API-Key` | Implementado |
+| `agenda/regras.py`, `agenda/fala.py` | Regras de validação da rega e frases faladas de confirmação, recusa e cancelamento | Implementado |
+| `agenda/repositorio.py`, `agenda/agendador.py`, `agenda/servico.py` | Persistência no Firestore, execução no horário sem duplicar, recarga no reinício e orquestração do pedido | Implementado (execução no horário ainda não confirmada com o vaso real) |
+| Contexto da conversa (Redis) | Contexto curto por dispositivo, com expiração | Planejado (opcional) |
 
 ## 5.3 Level 3
 
@@ -211,30 +219,31 @@ Este cenário não depende da nuvem: funciona mesmo com backend, broker ou Gemin
 
 ## 6.3 Runtime Scenario 3 — Pergunta ao assistente de voz (V1)
 
-1. O usuário aciona o microfone do S3 (botão "falar" — **[A DEFINIR]**, wake-word é alternativa) e faz a pergunta.
+1. O usuário aciona o microfone do S3 (botão "falar" — **[A DEFINIR]**, wake-word é alternativa) e faz a pergunta. Até aqui, o display do S3 mostra a carinha da planta (padrão, ADR-023).
 2. O S3 envia o áudio ao backend por `POST /audio`, com `X-API-Key` e o `deviceId`.
-3. O backend valida a chave e verifica o limite de perguntas no Redis.
-4. O backend lê a leitura atual do Firestore, calcula o estado da planta (ex.: "com sede") a partir dos limiares configurados e monta o prompt com a personalidade da planta.
-5. O backend envia o áudio e o contexto ao Gemini. A entrada de áudio direta no Gemini (sem STT separado) é uma **proposta** a validar; se não servir, entra um STT separado (ADR-018).
-6. O texto da resposta vai ao TTS, que gera o áudio.
-7. O backend devolve o áudio ao S3 na mesma requisição HTTP (**proposta**, **[A DEFINIR]**), que o reproduz.
+3. O backend valida a `X-API-Key` e o `X-Device-Id` e valida o áudio (formato, tamanho e duração); só então conta a pergunta no limite do Redis. Chave errada e áudio inválido não gastam o limite.
+4. O backend lê a leitura atual do Firestore, calcula o estado da planta (limiares configuráveis) e se o dado é recente (Seção 8.7), e monta o prompt com a personalidade da planta.
+5. Uma única chamada ao Gemini recebe o áudio (entrada direta, sem STT separado, validada em testes) e devolve um JSON com `pergunta_ouvida`, `resposta` e `acao` (pedido de rega, cenário 6.4). Se o modelo principal estiver lento ou fora do ar, entra o modelo reserva (Seção 8.8).
+6. O texto da resposta vai ao TTS do Gemini, que gera o áudio WAV. O backend decide a tela a partir da transcrição (`pergunta_ouvida`): dados dos sensores (ex.: pergunta sobre temperatura) ou carinha (ADR-023).
+7. O backend devolve, na mesma requisição HTTP, o WAV da resposta e os cabeçalhos `X-Tela` e `X-Dados` (Seção 8.4). O S3 reproduz o áudio e aplica a troca de tela, voltando à carinha ao final da resposta.
 
 ## 6.4 Runtime Scenario 4 — Rega agendada por voz ("regar daqui 1 minuto")
 
 1. O usuário pede a rega por voz (mesmo fluxo do cenário 6.3, até o Gemini).
-2. O Gemini devolve uma chamada de ferramenta (`agendar_rega`), em vez de texto livre. O Gemini nunca aciona a bomba.
-3. O backend valida: atraso e duração máximos, intervalo mínimo entre regas e dispositivo online. Se recusar, a resposta falada informa a recusa.
+2. O Gemini devolve, junto da resposta, o campo estruturado `acao` (`regar` ou `cancelar`, com `daqui_a_s` ou `as_hora` e, se a pessoa disser, `duracao_s`). Ele só entende o pedido: nunca aciona a bomba (ADR-025).
+3. O backend confere que a fala da pessoa realmente pede rega e valida o pedido: atraso máximo, duração máxima, intervalo mínimo entre regas, vaso online e solo não encharcado (Seção 8.5). A frase falada é escrita pelo backend e informa a confirmação ou a recusa.
 4. Se aceitar, o backend grava o agendamento no Firestore como `pendente` e cria uma tarefa `asyncio` em memória.
-5. Na hora marcada, o backend marca o agendamento como `executando` (antes de publicar, para nunca duplicar) e publica o comando em `greensync/{deviceId}/comandos`.
+5. Na hora marcada, o backend reivindica o agendamento (`pendente` para `executando`, em transação, antes de publicar), confere de novo se o vaso está online e o solo não está encharcado, e publica o comando em `greensync/{deviceId}/comandos`.
 6. O firmware WROOM liga a bomba pelo tempo pedido (limitado pelo tempo máximo do próprio firmware), desliga e publica `bomba_ligada`.
-7. O backend marca o agendamento como `concluida`. Se o backend reiniciar, ele recarrega os `pendente` do Firestore no startup; agendamentos que passaram da tolerância (**[A DEFINIR]**, sugestão: 5 minutos) viram `expirada` e não são executados.
+7. O backend marca o agendamento como `concluida` (comando publicado) ou `falhou` (com o `motivo`). Se o backend reiniciar, ele recarrega os `pendente` no startup: um agendamento atrasado até 5 minutos é executado uma vez; além disso vira `expirada`. Um agendamento encontrado como `executando` no startup vira `falhou` e nunca é repetido.
+8. Cancelar por voz ("cancela a rega") cancela a rega pendente mais próxima. O app também pode cancelar mudando o `status` de `pendente` para `cancelada` no Firestore: o backend só executa o que ainda estiver `pendente` no momento de disparar.
 
 ## 6.5 Runtime Scenario 5 — Dispositivo offline
 
 1. Ao conectar, o firmware WROOM publica `{"status": "online"}` em `greensync/{deviceId}/status` (com retain) e registra o Last Will `{"status": "offline"}` no mesmo tópico.
 2. Se o WROOM cair sem desconexão limpa, o broker publica o Last Will.
 3. O backend recebe o status e atualiza o campo `status` do dispositivo no Firestore.
-4. O app exibe "offline", evitando que o usuário confunda um dado antigo com um dado atual.
+4. O app exibe "offline", evitando que o usuário confunda um dado antigo com um dado atual. Como o WROOM não tem display (ADR-023), essa indicação no app é o único aviso visual de que o dispositivo de sensores está offline — mesmo que o S3 continue ligado e respondendo por voz.
 
 ## 6.6 Runtime Scenario 6 — Primeira configuração de Wi-Fi (ou troca de rede)
 
@@ -262,7 +271,7 @@ Custo baixo (um serviço pago; valores a confirmar no site do Render antes de co
 | Building Block | Infraestrutura |
 |---|---|
 | Firmware WROOM | ESP32-WROOM físico, no vaso |
-| Firmware S3 | ESP32-S3 físico, no vaso |
+| Firmware S3 | ESP32-S3 físico, no vaso (com display OLED) |
 | Broker MQTT | EMQX Cloud (plano gratuito/serverless **[A DEFINIR]**) |
 | Backend | Render — serviço web pago (Starter, 512 MB de RAM), instância única, sempre ativo |
 | Redis | Render Key Value (plano gratuito ou pago **[A DEFINIR]**) |
@@ -280,7 +289,7 @@ O backend é empacotado em uma imagem Docker (`Dockerfile`), usada tanto para o 
 docker-compose.yml (ambiente local)
 ├── backend      (FastAPI, hot-reload, porta 8000; monta serviceAccountKey.json como volume somente leitura)
 ├── mosquitto    (broker MQTT local, para desenvolver sem depender do EMQX Cloud)
-└── redis        (planejado)
+└── redis        (Redis 7, só na rede interna do compose; guarda o contador do limite de perguntas)
 ```
 
 A chave de serviço do Firebase fica **fora da imagem**: é montada como volume em desenvolvimento e configurada como variável/arquivo secreto no Render. Em produção roda apenas o container do backend, apontando para o EMQX Cloud, o Redis e o Firebase — sem Mosquitto.
@@ -329,7 +338,19 @@ Regras: campos extras são ignorados; payload inválido é registrado em log e d
 - Tópico de status: `greensync/{deviceId}/status`, payload `{"status": "online"}` ou `{"status": "offline"}`.
   - O firmware publica `online` ao conectar, com retain.
   - O `offline` é o **Last Will**, publicado pelo broker em desconexão inesperada.
-- Tópico de comandos (backend → WROOM) **(proposta)**: `greensync/{deviceId}/comandos`, QoS 1, payload por exemplo `{"acao": "regar", "duracao_s": 5, "id": "<idAgendamento>"}`. O firmware executa e aplica seu próprio limite de tempo máximo de bomba ligada.
+- Tópico de comandos (backend → WROOM): `greensync/{deviceId}/comandos`. **Implementado no backend; o firmware ainda precisa assinar e executar.**
+  - QoS 1, **sem retain** (um comando guardado no broker seria entregue de novo a quem reconectasse depois, e a bomba ligaria sem ninguém pedir).
+  - Payload: `{"acao": "regar", "duracao_s": 5, "id": "<idAgendamento>"}`.
+
+| Campo | Tipo | Observação |
+|---|---|---|
+| `acao` | texto | Hoje só `"regar"` |
+| `duracao_s` | inteiro | De 1 a 10 s (o backend já valida) |
+| `id` | texto | Id do agendamento no Firestore |
+
+  - O firmware **deve ignorar um `id` repetido**: o QoS 1 pode entregar a mesma mensagem mais de uma vez.
+  - O firmware **mantém o próprio tempo máximo de bomba ligada**, independente do `duracao_s` recebido.
+  - Depois de regar, o firmware publica `bomba_ligada` no tópico de sensores, como sempre. No backend, `concluida` significa "comando publicado", não "a bomba girou".
 
 ## 8.2 Esquema do Firestore (Backend ↔ App)
 
@@ -342,15 +363,16 @@ devices/{deviceId}                      (documento)
   }
   historico/{autoId}                    (subcoleção)
     ph, umidade_solo, temperatura_ar, umidade_ar, bomba_ligada, timestamp
-  agendamentos/{id}                     (subcoleção; planejado)
-    executar_em: timestamp
+  agendamentos/{id}                     (subcoleção)
+    quando: timestamp                   (hora marcada da rega)
     duracao_s: número
     status: "pendente" | "executando" | "concluida" | "cancelada" | "expirada" | "falhou"
-    origem: "voz" | "app"
-    criado_em: timestamp
+    origem: "voz" | "texto"
+    motivo: texto                       (só quando falha ou expira)
+    criado_em, atualizado_em: timestamp
 ```
 
-`leitura_atual` é um campo do próprio documento (e não uma subcoleção): o app assina um único documento e recebe status e leitura juntos. A leitura atual e o registro de histórico são gravados no mesmo lote (ou ambos, ou nenhum). Campos ausentes na leitura (ex.: `umidade_ar`) ficam ausentes ou nulos.
+`updated_at` é carimbado pelo servidor a cada leitura gravada e é a base do frescor dos dados (Seção 8.7). `leitura_atual` é um campo do próprio documento (e não uma subcoleção): o app assina um único documento e recebe status e leitura juntos. A leitura atual e o registro de histórico são gravados no mesmo lote (ou ambos, ou nenhum). Campos ausentes na leitura (ex.: `umidade_ar`) ficam ausentes ou nulos.
 
 ## 8.3 Segurança
 
@@ -360,26 +382,124 @@ devices/{deviceId}                      (documento)
 - Firestore em modo produção: o backend usa o Admin SDK (ignora as regras); as regras para o app serão definidas junto com a frente do aplicativo.
 - Uma chave de serviço exposta deve ser revogada e substituída imediatamente.
 
-## 8.4 Contrato HTTP de áudio (S3 ↔ Backend) — **(proposta, [A DEFINIR])**
+## 8.4 Contrato HTTP do assistente (S3 ↔ Backend)
 
-- `POST /audio` — cabeçalhos: `X-API-Key` e identificação do dispositivo (`deviceId`). Corpo: áudio da pergunta.
-- Resposta: áudio da resposta, na mesma requisição.
-- **[A DEFINIR]**: formato do áudio enviado (PCM bruto ou WAV; sugestão: 16 kHz, 16 bits, mono — se vier PCM, o backend adiciona o cabeçalho WAV), formato do áudio devolvido, duração máxima da pergunta.
-- `POST /perguntar` — mesma lógica, com a pergunta em texto; serve para testar o assistente sem hardware.
+**Implementado e testado no backend. Falta o firmware do S3 implementar o cliente.** Qualquer mudança aqui deve ser avisada às três frentes antes (SRS, 3.5.10).
+
+### `POST /audio` — pergunta falada, resposta falada
+
+**Requisição**
+
+| Item | Valor |
+|---|---|
+| Cabeçalho `X-API-Key` | Chave da API (obrigatória; se `API_KEY` estiver vazia no servidor, a rota fica aberta, só para desenvolvimento) |
+| Cabeçalho `X-Device-Id` | `deviceId` do vaso, ex.: `vaso-01` (letras, números, `-` e `_`, de 1 a 64 caracteres) |
+| Cabeçalho `Content-Type` | `audio/wav` |
+| Corpo | Os bytes do WAV: **16 kHz, 16 bits, mono**, até **15 s** e **1 MB** |
+| Parâmetro `?debug=true` | Opcional, só para depuração (ver abaixo) |
+
+Para testar com o celular, o backend também aceita mp3, m4a, aac, ogg e flac. O S3 deve mandar WAV.
+
+**Resposta 200**
+
+| Item | Valor |
+|---|---|
+| `Content-Type` | `audio/wav` (a voz da resposta, **24 kHz, 16 bits, mono** por padrão; a taxa é configurável no servidor) |
+| `X-Tela` | `rosto` ou `dados`: o que o display deve mostrar durante a resposta (ADR-023). Voltar à carinha ao final da fala |
+| `X-Dados` | JSON pequeno, só ASCII, para a tela de dados: `{"ph":6.4,"solo":20,"temp":24.1,"ar":58,"atuais":true}`. Campo ausente vem como `null`. `atuais` é `false` quando o vaso está offline ou a leitura é velha (o display deve avisar) |
+
+**Erros**
+
+| Código | Quando | Observação |
+|---|---|---|
+| 401 | `X-API-Key` ausente ou inválida | Não gasta o limite de perguntas |
+| 413 | Corpo maior que o máximo | Conferido pelo `Content-Length` e também contando o que chega |
+| 422 | `X-Device-Id` inválido, ou áudio vazio, ilegível, de formato não aceito ou mais longo que o máximo | Não gasta o limite |
+| 429 | Limite de perguntas atingido | Traz `Retry-After` (segundos). O S3 deve esperar esse tempo |
+| 502 | Gemini ou voz indisponíveis (inclusive depois do modelo reserva) | O S3 pode avisar "tente de novo" |
+
+**Depuração (`?debug=true`):** a resposta passa a trazer `X-Ouviu` (o que o modelo entendeu), `X-Texto` (a frase falada) e `X-Modelo`, com %-encoding. Fica desligado por padrão porque cabeçalhos compridos estouram o buffer do cliente HTTP do ESP32 e a fala da pessoa é dado pessoal.
+
+**Para o firmware do S3:**
+- Use um **timeout de pelo menos 30 s** no cliente HTTP: o caso típico medido é de cerca de 9 s (3 s para entender e responder, 5 a 6 s para gerar a voz), e o pior caso, com o modelo reserva, é bem maior.
+- A resposta tem cerca de 350 a 380 KB para 8 s de fala. Confirmar a memória do S3 (PSRAM) ou tocar em streaming; se faltar memória, o servidor pode gerar a voz em 16 kHz.
+- Pedidos de rega por voz não mudam nada para o S3: a frase de confirmação ou recusa já vem falada no WAV.
+
+### `POST /perguntar` — pergunta em texto
+
+Serve para testar o assistente sem hardware e para o app, se necessário. Cabeçalho `X-API-Key`; corpo JSON `{"device_id": "vaso-01", "pergunta": "..."}` (pergunta de 1 a 500 caracteres). Responde 200 com:
+
+```json
+{
+  "texto": "...",
+  "estado": {"estado": "atencao", "problemas": ["solo_seco"], "dados": "atuais", "idade_s": 3, "offline": false},
+  "tela": "dados",
+  "modelo": "gemini-3.5-flash-lite",
+  "rega": null
+}
+```
+
+`rega` é `null` se não houve pedido de rega; senão traz `{"resultado": "agendada" | "recusada" | "cancelada" | "nada_a_cancelar" | "falhou" | "erro" | "ignorada", "id": "..."}`. Os códigos de erro são os mesmos do `/audio` (401, 422, 429, 502).
 
 ## 8.5 Validação e limites de atuação
 
-O backend valida todo pedido de rega antes de agendar, com valores iniciais **a calibrar com testes reais**: atraso máximo (sugestão: 24 h), duração máxima (sugestão: 10 s), intervalo mínimo entre regas, recusa se o dispositivo estiver offline. A resposta falada reflete o resultado da validação. Se faltar duração no pedido, o backend usa um padrão calibrado. O firmware tem seu próprio tempo máximo de bomba ligada (defesa em profundidade).
+O backend valida todo pedido de rega antes de agendar. Os valores abaixo são configuráveis por variável de ambiente e **continuam a calibrar com testes reais**:
+
+| Regra | Valor atual | Variável |
+|---|---|---|
+| Atraso máximo | 24 h | `REGA_ATRASO_MAX_S` |
+| Duração máxima | 10 s | `REGA_DURACAO_MAX_S` |
+| Duração padrão (a pessoa não disse) | 5 s | `REGA_DURACAO_PADRAO_S` |
+| Intervalo mínimo entre regas | 10 min (conta regas pendentes, executando e concluídas) | `REGA_INTERVALO_MIN_S` |
+| Tolerância de atraso (reinício do backend) | 5 min | `REGA_TOLERANCIA_S` |
+| Vaso offline ou sem nenhuma leitura | Recusa | — |
+| Solo acima de 80% de umidade | Recusa a rega de agora (e confere de novo na hora de regar) | `SOLO_ENCHARCADO_ACIMA` |
+| Bomba já ligada | Recusa a rega de agora | — |
+
+Outras garantias:
+
+- **A fala da pessoa precisa conter uma palavra de rega** (regar, molhar, irrigar). Se o modelo propuser rega sem isso, o pedido é ignorado. Silêncio ou ruído (sem transcrição) nunca vira rega.
+- **Horário do relógio:** "às 15h" usa o fuso do usuário (`FUSO_UTC_H`, Brasília = -3). Se o horário de hoje já passou, vale o de amanhã.
+- **Nunca duplicar:** o status `executando` é gravado, em transação, antes de publicar o comando. Duas tentativas sobre a mesma rega (ex.: duas instâncias durante um deploy) nunca passam as duas. Dois pedidos ao mesmo tempo também não furam o intervalo mínimo (trava no backend).
+- **Reconferência na hora:** no horário marcado, o backend confere de novo se o vaso está online e o solo não está encharcado; se não, marca `falhou` com o motivo e não publica nada.
+- **Frases verdadeiras:** a confirmação e a recusa são escritas pelo backend, com o horário e a duração realmente agendados. Numa rega "de agora", o backend espera o resultado e, se falhar, a planta diz que não conseguiu.
+- O firmware tem seu próprio tempo máximo de bomba ligada (defesa em profundidade).
 
 ## 8.6 Assistente com personalidade
 
-O prompt do sistema faz a planta falar em primeira pessoa, de forma curta, só sobre a planta, usando apenas os números recebidos. Se um dado faltar, ela diz que não sabe. O "estado" da planta (ex.: com sede, ok) é calculado pelo backend a partir de limiares configuráveis, e o Gemini apenas dá a voz. O tom (mais informativo ou mais "planta") é configurável.
+O prompt do sistema faz a planta falar em primeira pessoa, de forma curta, só sobre a planta, usando apenas os números recebidos. Se um dado faltar, ela diz que não sabe. O "estado" da planta (ex.: com sede, ok) é calculado pelo backend a partir de limiares configuráveis, e o Gemini apenas dá a voz. O tom (mais informativo ou mais "planta") é configurável. Essa mesma personalidade também aparece visualmente na carinha do display do S3, que dá lugar aos dados dos sensores enquanto a resposta é dada (ADR-021, ADR-023).
+
+## 8.7 Frescor dos dados (vaso offline ou leitura velha)
+
+O assistente não pode falar como se o último valor ainda fosse o de agora (REQ-FUNC-007).
+
+- A cada leitura gravada, o backend carimba `leitura_atual.updated_at` com a hora do servidor e marca o `status` como `online`. O Last Will do broker marca `offline`.
+- O backend classifica os dados como `atuais`, `desatualizados` (sem leitura nova há mais de `LEITURA_VELHA_APOS_S`, 120 s por padrão, ou vaso offline) ou `sem_dados`, e calcula a idade da leitura.
+- Com dado velho ou vaso offline, a planta avisa em poucas palavras que são os últimos dados que recebeu e há quanto tempo, e não diz que está bem agora. Ela **não inventa a causa** (conexão, energia...) a menos que o vaso esteja marcado como desconectado.
+- Se `updated_at` faltar, a idade é desconhecida e o dado não é marcado como velho (a menos que o vaso esteja offline).
+- `X-Dados.atuais` leva essa informação ao display do S3 (Seção 8.4).
+
+## 8.8 Resiliência do assistente (Gemini e voz)
+
+- Há um modelo principal e um reserva (`GEMINI_MODEL` e `GEMINI_MODEL_FALLBACK`; na voz, `TTS_MODEL` e `TTS_MODEL_FALLBACK`).
+- Erro 5xx: tenta de novo uma vez no mesmo modelo. Timeout: vai direto ao reserva. Erro 4xx ou resposta vazia: vai ao reserva. Se todos falham, a rota responde 502.
+- Prazos por chamada: 8 s para texto, 12 s para entender o áudio, 15 s para a voz.
+- Em testes reais, o modelo principal estourou o prazo ou deu 503 com frequência e o reserva respondeu; trocar a ordem no `.env` é a mitigação imediata.
+- A integração fica atrás de `responder` e `responder_audio` (ADR-018): trocar de provedor mexe só no interior dessas funções.
+
+## 8.9 Limite de perguntas e proteção dos endpoints
+
+- **Limite (REQ-FUNC-015):** janela fixa no Redis, 10 perguntas por 60 s por chave de API (`LIMITE_PERGUNTAS`, `JANELA_LIMITE_S`). Só o hash da chave vai para o Redis. `/perguntar` e `/audio` compartilham o mesmo limite.
+- **Se o Redis não estiver configurado ou cair, a pergunta passa** (e o erro é logado): preferimos o assistente no ar a derrubá-lo por causa do contador.
+- **Ordem das checagens:** chave (401), `device_id` (422), áudio (413/422) e só então o limite (429). Assim, requisições inválidas não gastam o limite nem o Gemini.
+- A chave é comparada em tempo constante. O `device_id` só aceita `^[A-Za-z0-9_-]{1,64}$`, porque vira nome de documento no Firestore.
+- O que a pessoa falou ou escreveu **não vai para o log**; só tamanhos, tempos, a tela escolhida e o resultado da rega.
 
 ---
 
 # 9. Architecture Decisions
 
-Ver documento separado **ADR — Decisões — GreenSync**, que registra as decisões arquiteturais (ADR-001 a ADR-022). Decisões recentes, desta versão do documento:
+Ver documento separado **ADR — Decisões — GreenSync**, que registra as decisões arquiteturais (ADR-001 a ADR-026). Decisões recentes, desta versão do documento:
 
 | ADR | Tema |
 |---|---|
@@ -392,6 +512,10 @@ Ver documento separado **ADR — Decisões — GreenSync**, que registra as deci
 | ADR-020 | Sensores DHT22 e YL-69 (substitui a ADR-008) |
 | ADR-021 | Assistente com personalidade e rega por voz, agenda no Firestore |
 | ADR-022 | Provisionamento de Wi-Fi por portal |
+| ADR-023 | Display no ESP32-S3, alternando entre rosto e dados dos sensores (resolve a pendência da ADR-016) |
+| ADR-024 | pH simulado na demonstração, combinado com o professor |
+| ADR-025 | Pedido de rega como saída estruturada, validado e confirmado pelo backend (ajusta o item 2 da ADR-021) |
+| ADR-026 | Dados desatualizados e tolerância a falhas do assistente |
 
 ---
 
@@ -413,6 +537,10 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | Leitura ruidosa do sensor de umidade | Valor oscila perto do limiar de irrigação | Histerese evita ligar/desligar repetidamente a bomba |
 | Leitura inválida do DHT22 | O sensor falha e devolve `NaN` | O firmware não publica; se algo inválido chegar, o backend descarta |
 | Instância duplicada do backend | Duas instâncias assinam o mesmo tópico | Evitado por configuração: instância única, sem autoscaling |
+| Pergunta por voz feita ao assistente | Usuário pergunta "como ela tá?" | O display do S3 troca da carinha para os dados dos sensores relevantes, e volta à carinha ao final da resposta |
+| Vaso para de enviar dados | Sem leitura nova há mais de 120 s, ou Last Will recebido | O assistente avisa que são os últimos dados e há quanto tempo, sem dizer que está bem agora; `X-Dados.atuais` vem `false` |
+| Pedido de rega com o vaso offline | Usuário pede "rega agora" e o vaso está offline | O backend recusa e a planta diz que não consegue regar porque o vaso está desconectado; nada é publicado |
+| Modelo principal do Gemini lento ou fora do ar | Timeout ou 503 | O backend tenta o modelo reserva; só se todos falharem a rota responde 502 |
 
 ---
 
@@ -430,7 +558,11 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | Plano do EMQX Cloud | Limites de conexões e mensagens do plano gratuito ainda não conferidos | Conferir antes de criar o cluster; Mosquitto local para desenvolvimento |
 | Firewall da faculdade | Redes de faculdade podem bloquear a porta 8883 | Testar na rede real; alternativa de MQTT sobre WebSocket seguro na 443 |
 | Cotas do Gemini | Limites do plano gratuito (incluindo áudio) ainda não conferidos | Conferir; isolar a chamada em `responder(audio, leitura)` para trocar de provedor |
-| Contratos ainda não validados entre as frentes | Contrato MQTT, tópico de comandos e contrato HTTP de áudio ainda são propostas | Validar e travar cada contrato antes de o desenvolvimento paralelo avançar |
+| Contratos ainda não validados com o firmware | O backend já implementa o contrato MQTT, o tópico de comandos e o contrato HTTP de áudio (Seções 8.1 e 8.4); falta o firmware (WROOM e S3) confirmar e testar | Testar com o hardware, em grupo; qualquer mudança de contrato é avisada antes |
+| Tamanho da resposta de áudio no S3 | A voz chega em WAV de 24 kHz, cerca de 350 a 380 KB para 8 s | Confirmar a memória (PSRAM) do S3 ou tocar em streaming; o servidor pode gerar em 16 kHz |
+| Modelo principal do Gemini instável | Em testes, estourou o prazo ou deu 503 com frequência | Modelo reserva automático (Seção 8.8); trocar a ordem dos modelos no `.env` |
+| pH simulado | O pH da demonstração não é medido (ADR-024) | Dizer isso na apresentação; trocar pela sonda real mexe só no firmware |
+| Precedência entre irrigação automática e rega agendada | Ainda não definida (SRS, REQ-FUNC-002) | Definir com o firmware; o backend já recusa a rega de agora com a bomba ligada ou o solo encharcado |
 | Redis e a expectativa do professor | O uso definido (contexto, limite) pode não ser o esperado | Confirmar com o professor (fila, cache ou ambos) |
 | Prazo | Prazos da V1 e da V2 ainda não definidos com a IA na V1 | Confirmar com o professor |
 
@@ -452,5 +584,7 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | YL-69 | Sensor resistivo de umidade do solo, de duas hastes; exige calibração |
 | Provisionamento de Wi-Fi | Configuração da rede do ESP sem regravar o firmware (portal de configuração) |
 | Histerese | Margem de segurança que evita ligar/desligar repetidamente a bomba quando o valor oscila perto do limiar |
+| Display OLED (SSD1306) | Tela do ESP32-S3 que mostra, por padrão, a carinha da planta e troca para os dados dos sensores durante uma resposta de voz (ADR-023) |
+| Frescor (dos dados) | Se a leitura é recente o bastante para ser tratada como "agora" (Seção 8.7) |
 | V1 | Primeira fase de entrega: hardware, sensores, irrigação, sincronização de dados, app e assistente de voz |
 | V2 | Segunda fase de entrega: conectividade GPRS |
