@@ -1,37 +1,28 @@
 """Única porta de entrada para o LLM (ADR-018).
 
-Todo o resto do backend chama `responder(...)`. Se um dia trocarmos
-Gemini por Groq, só o INTERIOR desta função muda.
-
-Resiliência (o plano gratuito sofre picos e lentidão):
-- erro 503: tenta de novo uma vez no mesmo modelo;
-- timeout (lento demais): vai direto para o modelo reserva;
-- erro 4xx (modelo errado, cota, chave): vai direto para o reserva.
+Todo o resto do backend chama `responder(...)` (texto) ou `responder_audio(...)`
+(pergunta falada). Se um dia trocarmos Gemini por Groq, só o INTERIOR destas
+funções muda. Retry, timeout e modelo reserva ficam em `resiliencia.py`.
 """
-import asyncio
+import json
 import logging
 
 from google import genai
-from google.genai import errors, types
+from google.genai import types
+from pydantic import BaseModel
 
 from app.ai.estado import avaliar_estado
 from app.ai.prompt import montar_system_prompt
+from app.ai.resiliencia import IAError, tentar_modelos  # IAError é re-exportado daqui
 from app.config import settings
 
 log = logging.getLogger(__name__)
 
 _client: genai.Client | None = None
 
-TENTATIVAS_POR_MODELO = 2   # 1 tentativa + 1 nova tentativa (só para 503)
-ESPERA_ENTRE_TENTATIVAS_S = 0.5
 
-
-class IAError(Exception):
-    """Falha ao gerar resposta (chave ausente, API fora, resposta vazia)."""
-
-
-def _get_client() -> genai.Client:
-    """Cria o cliente uma vez só e reaproveita."""
+def get_client() -> genai.Client:
+    """Cria o cliente uma vez só e reaproveita (também usado por voz.py)."""
     global _client
     if not settings.gemini_api_key:
         raise IAError("GEMINI_API_KEY não configurada no .env")
@@ -49,66 +40,93 @@ def _modelos() -> list[str]:
     return modelos
 
 
+async def _gerar(contents, config, timeout_s: float) -> tuple[str, str]:
+    """Chama o Gemini (com retry/reserva) e devolve (texto, modelo)."""
+    client = get_client()  # levanta IAError se faltar a chave
+
+    def chamar(modelo: str):
+        return client.aio.models.generate_content(
+            model=modelo, contents=contents, config=config
+        )
+
+    def extrair(resp) -> str:
+        return (resp.text or "").strip()
+
+    return await tentar_modelos(_modelos(), chamar, extrair, timeout_s, "Gemini")
+
+
 async def responder(pergunta: str, leitura: dict | None) -> dict:
-    """Responde `pergunta` como a planta, com base na `leitura` atual.
+    """Responde `pergunta` (texto) como a planta, com base na `leitura` atual.
 
     Devolve {"texto": str, "estado": {...}, "modelo": str}.
     Levanta IAError se todos os modelos falharem.
     """
     # Estado da planta + se o dado ainda vale como "agora" (vaso offline / leitura velha).
     estado = avaliar_estado(leitura)
-    system = montar_system_prompt(leitura, estado)
     config = types.GenerateContentConfig(
-        system_instruction=system,
+        system_instruction=montar_system_prompt(leitura, estado),
         temperature=0.7,
         # Sem max_output_tokens de propósito: em modelos com "thinking",
         # um limite baixo pode consumir tudo no raciocínio e vir vazio.
     )
-    client = _get_client()  # levanta IAError se faltar a chave
-    ultimo_erro = "desconhecido"
+    texto, modelo = await _gerar(pergunta, config, settings.gemini_timeout_s)
+    return {"texto": texto, "estado": estado, "modelo": modelo}
 
-    for modelo in _modelos():
-        for tentativa in range(1, TENTATIVAS_POR_MODELO + 1):
-            try:
-                resp = await asyncio.wait_for(
-                    client.aio.models.generate_content(
-                        model=modelo, contents=pergunta, config=config
-                    ),
-                    timeout=settings.gemini_timeout_s,
-                )
-            except asyncio.TimeoutError:
-                # Lento demais: repetir no mesmo modelo só atrasaria mais.
-                ultimo_erro = f"{modelo}: timeout de {settings.gemini_timeout_s}s"
-                log.warning("Gemini %s estourou o tempo (%ss)",
-                            modelo, settings.gemini_timeout_s)
-                break
-            except errors.ServerError as e:
-                # 5xx (ex.: 503 "high demand"): temporário, vale tentar de novo.
-                ultimo_erro = f"{modelo}: {e}"
-                log.warning("Gemini %s indisponível (tentativa %d): %s",
-                            modelo, tentativa, e.code)
-                if tentativa < TENTATIVAS_POR_MODELO:
-                    await asyncio.sleep(ESPERA_ENTRE_TENTATIVAS_S)
-                continue
-            except errors.ClientError as e:
-                # 4xx (404 modelo errado, 429 cota, 401/403 chave): repetir
-                # não adianta; passa direto para o próximo modelo.
-                ultimo_erro = f"{modelo}: {e}"
-                log.error("Gemini %s recusou a chamada: %s", modelo, e.code)
-                break
-            except Exception as e:
-                ultimo_erro = f"{modelo}: {e}"
-                log.error("Erro inesperado no Gemini %s: %s", modelo, e)
-                break
 
-            texto = (resp.text or "").strip()
-            if texto:
-                if modelo != settings.gemini_model:
-                    log.warning("Resposta veio do modelo reserva: %s", modelo)
-                return {"texto": texto, "estado": estado, "modelo": modelo}
+# ---------------------------------------------------------------- áudio ----
 
-            ultimo_erro = f"{modelo}: resposta vazia"
-            log.warning("Gemini %s devolveu resposta vazia", modelo)
-            break
+class SaidaAudio(BaseModel):
+    """Formato que pedimos ao Gemini quando a pergunta chega em áudio."""
+    pergunta_ouvida: str
+    resposta: str
 
-    raise IAError(f"nenhum modelo respondeu ({ultimo_erro})")
+
+def ler_saida_audio(bruto: str) -> tuple[str, str]:
+    """Extrai (pergunta_ouvida, resposta) do JSON devolvido pelo Gemini.
+
+    Tolera cerca de markdown (```json) e, se o modelo ignorar o JSON e devolver
+    só texto, usa esse texto como resposta (sem pergunta ouvida).
+    """
+    texto = bruto.strip()
+    if texto.startswith("```"):
+        texto = texto.strip("`")
+        if texto.lower().startswith("json"):
+            texto = texto[4:]
+        texto = texto.strip()
+    try:
+        dados = json.loads(texto)
+    except ValueError:
+        return "", bruto.strip()
+    if not isinstance(dados, dict):
+        return "", bruto.strip()
+    pergunta = str(dados.get("pergunta_ouvida") or "").strip()
+    resposta = str(dados.get("resposta") or "").strip()
+    return pergunta, resposta
+
+
+async def responder_audio(audio: bytes, mime: str, leitura: dict | None) -> dict:
+    """Entende uma pergunta FALADA e responde como a planta (ADR-018, camada 2).
+
+    O Gemini ouve o áudio direto (sem STT separado) e devolve dois campos:
+    o que ouviu (usado para decidir a tela e para o log) e a resposta.
+
+    Devolve {"texto", "pergunta_ouvida", "estado", "modelo"}.
+    Levanta IAError se todos os modelos falharem ou se a resposta vier vazia.
+    """
+    estado = avaliar_estado(leitura)
+    config = types.GenerateContentConfig(
+        system_instruction=montar_system_prompt(leitura, estado, audio=True),
+        temperature=0.7,
+        response_mime_type="application/json",
+        response_schema=SaidaAudio,
+    )
+    contents = [
+        types.Part.from_bytes(data=audio, mime_type=mime),
+        "Responda à pergunta falada neste áudio.",
+    ]
+    bruto, modelo = await _gerar(contents, config, settings.gemini_timeout_audio_s)
+
+    pergunta, texto = ler_saida_audio(bruto)
+    if not texto:
+        raise IAError(f"{modelo}: resposta vazia")
+    return {"texto": texto, "pergunta_ouvida": pergunta, "estado": estado, "modelo": modelo}

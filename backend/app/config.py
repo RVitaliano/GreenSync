@@ -29,6 +29,20 @@ class Settings(BaseSettings):
     gemini_model_fallback: str = "gemini-3.5-flash-lite"
     # Tempo máximo de espera por chamada, em segundos. Acima disso, vai para o reserva.
     gemini_timeout_s: float = 8.0
+    # Pergunta em áudio demora mais (o modelo ouve e responde), então tem prazo próprio.
+    gemini_timeout_audio_s: float = 12.0
+
+    # --- Voz (TTS): transforma o texto da resposta em áudio ---
+    tts_model: str = "gemini-3.8-flash-tts"
+    tts_model_fallback: str = "gemini-3.8-flash-lite-tts"
+    tts_voice: str = "Kore"        # voz pré-pronta; outras: Puck, Zephyr, Aoede...
+    tts_estilo: str = ""           # ex.: "simpática e carinhosa". Vazio = sem estilo
+    tts_sample_rate: int = 0       # 0 = padrão do modelo (24000 Hz). Ex.: 16000
+    tts_timeout_s: float = 15.0
+
+    # --- Áudio recebido do S3 / celular (POST /audio) ---
+    audio_max_bytes: int = 1_000_000   # ~30 s de WAV 16 kHz mono 16 bits
+    audio_max_s: float = 15.0          # pergunta mais longa que isso é recusada
 
     # --- Personalidade ---
     tom_planta: str = "planta"  # "planta" (divertido) ou "informativo" (mais seco)
