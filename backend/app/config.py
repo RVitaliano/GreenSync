@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     ph_min: float = 5.5
     ph_max: float = 7.5
 
+    # Passou desse tempo sem leitura nova, o dado é tratado como velho e a planta
+    # avisa em vez de falar como se fosse de agora. O firmware publica a cada
+    # 10 a 30 s (Arc42 8.1); 120 s = vários envios perdidos.
+    leitura_velha_apos_s: int = 120
+
     # --- API HTTP ---
     api_key: str = ""  # se vazia, a rota fica aberta (só para desenvolvimento)
 

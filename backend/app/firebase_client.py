@@ -54,12 +54,21 @@ def _save_status_sync(device_id: str, status: str) -> None:
 
 
 def _read_current_sync(device_id: str) -> dict | None:
-    """Campo `leitura_atual` do dispositivo, ou None se ele ainda não existe."""
+    """Campo `leitura_atual` do dispositivo, ou None se ele ainda não existe.
+
+    Junta a ele o `status` do documento (online/offline, vindo do Last Will)
+    como `status_vaso`, para o assistente saber se o dado ainda vale como "agora".
+    `leitura_atual` já traz `updated_at`, gravado a cada leitura.
+    """
     db = init_firebase()
     doc = db.collection("devices").document(device_id).get()
     if not doc.exists:
         return None
-    return (doc.to_dict() or {}).get("leitura_atual")
+    dados = doc.to_dict() or {}
+    leitura = dados.get("leitura_atual")
+    if not leitura:
+        return None
+    return {**leitura, "status_vaso": dados.get("status")}
 
 
 # O SDK do Firestore é síncrono; to_thread evita travar o loop do MQTT/FastAPI.

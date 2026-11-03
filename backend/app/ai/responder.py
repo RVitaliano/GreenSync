@@ -14,7 +14,7 @@ import logging
 from google import genai
 from google.genai import errors, types
 
-from app.ai.estado import calcular_estado
+from app.ai.estado import avaliar_estado
 from app.ai.prompt import montar_system_prompt
 from app.config import settings
 
@@ -55,7 +55,8 @@ async def responder(pergunta: str, leitura: dict | None) -> dict:
     Devolve {"texto": str, "estado": {...}, "modelo": str}.
     Levanta IAError se todos os modelos falharem.
     """
-    estado = calcular_estado(leitura)
+    # Estado da planta + se o dado ainda vale como "agora" (vaso offline / leitura velha).
+    estado = avaliar_estado(leitura)
     system = montar_system_prompt(leitura, estado)
     config = types.GenerateContentConfig(
         system_instruction=system,
