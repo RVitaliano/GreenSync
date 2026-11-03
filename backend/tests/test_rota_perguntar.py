@@ -1,4 +1,4 @@
-"""Testa a rota POST /perguntar sem Gemini e sem Firestore (tudo simulado)."""
+"""Testa a rota POST /perguntar sem Gemini, Firestore e Redis (tudo simulado)."""
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,7 +12,7 @@ LEITURA = {"umidade_solo": 20, "temperatura_ar": 24.1, "bomba_ligada": False}
 
 @pytest.fixture
 def client(monkeypatch):
-    """App só com o router de IA; Firestore e Gemini trocados por versões falsas."""
+    """App só com o router de IA; Firestore, Gemini e limite trocados por versões falsas."""
     chamadas = {}
 
     async def leitura_falsa(device_id):
@@ -25,8 +25,13 @@ def client(monkeypatch):
         return {"texto": "Estou com sede.", "estado": {"estado": "atencao", "problemas": ["solo_seco"]},
                 "modelo": "modelo-falso"}
 
+    async def limite_falso(chave):
+        chamadas["limite_chave"] = chave
+        return chamadas.get("espera")  # None = pode seguir; número = segundos de espera
+
     monkeypatch.setattr(rota, "ler_leitura_atual", leitura_falsa)
     monkeypatch.setattr(rota, "responder", responder_falso)
+    monkeypatch.setattr(rota, "verificar_limite", limite_falso)
     monkeypatch.setattr(settings, "api_key", "segredo")
 
     app = FastAPI()
@@ -50,10 +55,16 @@ def test_resposta_ok(client):
     assert corpo["modelo"] == "modelo-falso"
     assert client.chamadas["device_id"] == "vaso-01"
     assert client.chamadas["leitura"] == LEITURA
+    assert client.chamadas["limite_chave"] == "segredo"
 
 
 def test_chave_errada_da_401(client):
     assert post(client, chave="errada").status_code == 401
+
+
+def test_chave_errada_nao_gasta_o_limite(client):
+    post(client, chave="errada")
+    assert "limite_chave" not in client.chamadas
 
 
 def test_sem_chave_da_401(client):
@@ -72,6 +83,15 @@ def test_chave_vazia_no_env_deixa_aberta(client, monkeypatch):
     monkeypatch.setattr(settings, "api_key", "")
     r = client.post("/perguntar", json={"device_id": "vaso-01", "pergunta": "Oi?"})
     assert r.status_code == 200
+
+
+def test_limite_estourado_da_429_sem_chamar_o_gemini(client):
+    client.chamadas["espera"] = 30
+    r = post(client)
+    assert r.status_code == 429
+    assert r.headers["Retry-After"] == "30"
+    assert "pergunta" not in client.chamadas   # o Gemini nem foi chamado
+    assert "device_id" not in client.chamadas  # nem o Firestore
 
 
 @pytest.mark.parametrize("device", ["a/b", "../x", "", "x" * 65, "vaso 01"])
