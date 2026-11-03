@@ -1,7 +1,7 @@
 """Conexão única com o Redis (ADR-015).
 
-Hoje serve ao limite de perguntas. Depois vai guardar o contexto curto da
-conversa de cada dispositivo.
+Serve ao limite de perguntas (app/limite.py) e ao contexto curto da conversa
+de cada dispositivo (app/contexto.py).
 """
 import redis.asyncio as redis
 

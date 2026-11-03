@@ -151,6 +151,30 @@ async def test_responder_audio_sem_fala_descarta_o_pedido(monkeypatch):
     assert r["acao"] is None
 
 
+# ---------- conversa recente (REQ-FUNC-008) ----------
+
+HISTORICO = [{"pergunta": "Qual a temperatura?", "resposta": "Uns 24 graus."}]
+
+
+async def test_historico_chega_ao_prompt_de_texto(monkeypatch):
+    g = usar(monkeypatch, GeminiFalso(texto_json()))
+    await responder("E a umidade?", LEITURA, historico=HISTORICO)
+    assert "Qual a temperatura?" in g.chamadas[0]["config"].system_instruction
+    assert g.chamadas[0]["contents"] == "E a umidade?"      # a pergunta nova segue separada
+
+
+async def test_historico_chega_ao_prompt_de_audio(monkeypatch):
+    g = usar(monkeypatch, GeminiFalso(SAIDA))
+    await responder_audio(b"x", "audio/wav", LEITURA, historico=HISTORICO)
+    assert "Uns 24 graus." in g.chamadas[0]["config"].system_instruction
+
+
+async def test_sem_historico_o_prompt_nao_muda(monkeypatch):
+    g = usar(monkeypatch, GeminiFalso(texto_json()))
+    await responder("Oi?", LEITURA)
+    assert "CONVERSA RECENTE" not in g.chamadas[0]["config"].system_instruction
+
+
 # ---------- leitura do JSON devolvido ----------
 
 def test_ler_saida_json_normal():

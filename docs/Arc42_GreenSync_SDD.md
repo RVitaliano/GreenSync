@@ -1,6 +1,6 @@
 # Arc42 — Documento de Arquitetura de Software (SDD) — GreenSync
 
-> **Versão 0.5 — 03/11/2026.** Atualizado com o backend implementado: contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
+> **Versão 0.5 — 03/11/2026.** Atualizado com o backend implementado (inclui o contexto curto da conversa no Redis): contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
 
 ---
 
@@ -133,7 +133,7 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 - Purpose/Responsibility: contexto curto da conversa por dispositivo (com expiração) e limite de perguntas por chave de API. Uso como cache da última leitura é opcional.
 - Interface(s): protocolo Redis, acessado só pelo backend, via `REDIS_URL`.
 - Fulfilled Requirements: REQ-FUNC-015 (e apoio ao REQ-FUNC-008).
-- Open Issues/Problems/Risks: hoje o Redis só guarda o contador do limite de perguntas; o contexto curto da conversa ainda não foi implementado (opcional); no plano gratuito do Render, o Key Value (se disponível) é só em memória e perde dados ao reiniciar — aceito, pois o conteúdo é descartável. Expectativa exata do professor sobre o uso do Redis **[A DEFINIR]**.
+- Open Issues/Problems/Risks: o Redis guarda só dados descartáveis (contador do limite e as últimas trocas da conversa); se faltar ou cair, o assistente segue sem limite e sem contexto; no plano gratuito do Render, o Key Value (se disponível) é só em memória e perde dados ao reiniciar — aceito, pois o conteúdo é descartável. Expectativa exata do professor sobre o uso do Redis **[A DEFINIR]**.
 
 ### Firebase (Firestore)
 
@@ -188,7 +188,7 @@ Módulos internos: captura de áudio (I2S), botão de falar e mute, cliente HTTP
 | `routes/ia.py`, `routes/audio.py` | `POST /perguntar` (texto) e `POST /audio`, com `X-API-Key` | Implementado |
 | `agenda/regras.py`, `agenda/fala.py` | Regras de validação da rega e frases faladas de confirmação, recusa e cancelamento | Implementado |
 | `agenda/repositorio.py`, `agenda/agendador.py`, `agenda/servico.py` | Persistência no Firestore, execução no horário sem duplicar, recarga no reinício e orquestração do pedido | Implementado (execução no horário ainda não confirmada com o vaso real) |
-| Contexto da conversa (Redis) | Contexto curto por dispositivo, com expiração | Planejado (opcional) |
+| Contexto da conversa (Redis) | Últimas 3 trocas por dispositivo, com expiração de 5 min (`app/contexto.py`) | Implementado |
 
 ## 5.3 Level 3
 
@@ -222,9 +222,9 @@ Este cenário não depende da nuvem: funciona mesmo com backend, broker ou Gemin
 1. O usuário aciona o microfone do S3 (botão "falar" — **[A DEFINIR]**, wake-word é alternativa) e faz a pergunta. Até aqui, o display do S3 mostra a carinha da planta (padrão, ADR-023).
 2. O S3 envia o áudio ao backend por `POST /audio`, com `X-API-Key` e o `deviceId`.
 3. O backend valida a `X-API-Key` e o `X-Device-Id` e valida o áudio (formato, tamanho e duração); só então conta a pergunta no limite do Redis. Chave errada e áudio inválido não gastam o limite.
-4. O backend lê a leitura atual do Firestore, calcula o estado da planta (limiares configuráveis) e se o dado é recente (Seção 8.7), e monta o prompt com a personalidade da planta.
+4. O backend lê a leitura atual do Firestore e as últimas trocas da conversa no Redis (Seção 8.9), calcula o estado da planta (limiares configuráveis) e se o dado é recente (Seção 8.7), e monta o prompt com a personalidade da planta.
 5. Uma única chamada ao Gemini recebe o áudio (entrada direta, sem STT separado, validada em testes) e devolve um JSON com `pergunta_ouvida`, `resposta` e `acao` (pedido de rega, cenário 6.4). Se o modelo principal estiver lento ou fora do ar, entra o modelo reserva (Seção 8.8).
-6. O texto da resposta vai ao TTS do Gemini, que gera o áudio WAV. O backend decide a tela a partir da transcrição (`pergunta_ouvida`): dados dos sensores (ex.: pergunta sobre temperatura) ou carinha (ADR-023).
+6. O texto da resposta vai ao TTS do Gemini, que gera o áudio WAV; com a voz pronta, a troca (transcrição e frase falada) é guardada no contexto da conversa. O backend decide a tela a partir da transcrição (`pergunta_ouvida`): dados dos sensores (ex.: pergunta sobre temperatura) ou carinha (ADR-023).
 7. O backend devolve, na mesma requisição HTTP, o WAV da resposta e os cabeçalhos `X-Tela` e `X-Dados` (Seção 8.4). O S3 reproduz o áudio e aplica a troca de tela, voltando à carinha ao final da resposta.
 
 ## 6.4 Runtime Scenario 4 — Rega agendada por voz ("regar daqui 1 minuto")
@@ -494,6 +494,8 @@ O assistente não pode falar como se o último valor ainda fosse o de agora (REQ
 - **Ordem das checagens:** chave (401), `device_id` (422), áudio (413/422) e só então o limite (429). Assim, requisições inválidas não gastam o limite nem o Gemini.
 - A chave é comparada em tempo constante. O `device_id` só aceita `^[A-Za-z0-9_-]{1,64}$`, porque vira nome de documento no Firestore.
 - O que a pessoa falou ou escreveu **não vai para o log**; só tamanhos, tempos, a tela escolhida e o resultado da rega.
+- **Contexto da conversa (REQ-FUNC-008, ADR-015):** lista `ctx:{deviceId}` no Redis com as últimas 3 trocas (`CONTEXTO_TURNOS`), cada pergunta e resposta cortada em 300 caracteres (`CONTEXTO_MAX_CHARS`) e prazo de 5 min renovado a cada troca (`CONTEXTO_TTL_S`). Só texto, nunca áudio. Entra no prompt só para entender referências ("e a umidade?"): os números vêm sempre dos dados atuais, e o prompt manda ignorar instruções vindas da conversa. Guarda-se a frase que foi **falada** (na rega, a confirmação do backend), não a proposta do modelo. Sem Redis ou com Redis fora do ar, segue sem contexto. `CONTEXTO_TURNOS=0` desliga.
+- Um pedido de rega que dependa só do contexto ("e daqui a 1 hora?") não vale: a trava da rega exige uma palavra de rega na frase atual (ADR-025), e a planta pede para a pessoa repetir.
 
 ---
 

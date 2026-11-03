@@ -23,6 +23,7 @@ Com ?debug=true a resposta também traz X-Ouviu, X-Texto e X-Modelo (texto com
 %-encoding). Ficam desligados por padrão: cabeçalhos compridos estouram o
 buffer do cliente HTTP do ESP32, e o que a pessoa falou é dado pessoal.
 """
+import asyncio
 import json
 import logging
 import re
@@ -38,6 +39,7 @@ from app.ai.responder import responder_audio
 from app.ai.tela import decidir_tela
 from app.ai.voz import sintetizar
 from app.config import settings
+from app.contexto import ler_contexto, salvar_turno
 from app.firebase_client import ler_leitura_atual
 from app.limite import verificar_limite
 from app.seguranca import DEVICE_ID_PADRAO, chave_valida
@@ -121,11 +123,14 @@ async def audio(
             headers={"Retry-After": str(espera)},
         )
 
-    leitura = await ler_leitura_atual(x_device_id)
+    # Dados do vaso e conversa recente, buscados ao mesmo tempo.
+    leitura, historico = await asyncio.gather(
+        ler_leitura_atual(x_device_id), ler_contexto(x_device_id)
+    )
 
     t0 = time.monotonic()
     try:
-        r = await responder_audio(corpo, mime, leitura)
+        r = await responder_audio(corpo, mime, leitura, historico=historico)
     except IAError as e:
         log.error("[%s] IA falhou: %s", x_device_id, e)
         raise HTTPException(status_code=502, detail="assistente indisponível")
@@ -143,6 +148,9 @@ async def audio(
         log.error("[%s] voz falhou: %s", x_device_id, e)
         raise HTTPException(status_code=502, detail="voz indisponível")
     t_tts = time.monotonic() - t0
+
+    # A planta lembra desta troca (só se a pessoa disse algo; silêncio não é guardado).
+    await salvar_turno(x_device_id, r["pergunta_ouvida"], r["texto"])
 
     tela = decidir_tela(r["pergunta_ouvida"])
     # Não registramos o que a pessoa falou (dado pessoal); só tamanhos e tempos.

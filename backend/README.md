@@ -32,6 +32,7 @@ backend/
     firebase_client.py   # Firestore: gravar leitura/status, ler leitura atual
     redis_client.py      # conexão com o Redis
     limite.py            # limite de perguntas por chave (janela fixa)
+    contexto.py          # contexto curto da conversa no Redis (últimas trocas, com validade)
     seguranca.py         # X-API-Key (tempo constante) e regra do device_id
     routes/
       ia.py              # POST /perguntar
@@ -106,7 +107,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (274 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado. Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar) e a publicação do comando.
+A suíte (311 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado. Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar) e a publicação do comando.
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -198,6 +199,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `API_KEY` | Chave exigida no `X-API-Key` (vazia = rotas abertas, só para desenvolvimento) |
 | `REDIS_URL` | Ex.: `redis://redis:6379/0` (vazia = limite de perguntas desligado) |
 | `LIMITE_PERGUNTAS` / `JANELA_LIMITE_S` | Perguntas permitidas por janela (padrão 10 por 60 s) |
+| `CONTEXTO_TURNOS` / `CONTEXTO_TTL_S` / `CONTEXTO_MAX_CHARS` | Trocas lembradas (padrão 3; 0 desliga), validade em segundos (300) e tamanho máximo de cada fala guardada (300) |
 | `LEITURA_VELHA_APOS_S` | Segundos sem leitura para os dados serem tratados como velhos (padrão 120) |
 | `REGA_ATRASO_MAX_S`, `REGA_DURACAO_MAX_S`, `REGA_DURACAO_PADRAO_S`, `REGA_INTERVALO_MIN_S`, `REGA_TOLERANCIA_S` | Limites da rega por voz |
 | `FUSO_UTC_H` | Fuso para "às 15h" (Brasília = -3) |
@@ -214,7 +216,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `POST /perguntar` e `POST /audio` (Gemini + voz) | Implementado |
 | Rega por voz, agendamento persistente e comando MQTT | Implementado (execução no horário com o vaso real ainda não testada) |
 | Teste do Last Will com o firmware | Pendente |
-| Contexto curto da conversa no Redis | Planejado (opcional) |
+| Contexto curto da conversa no Redis (últimas 3 trocas, 5 min) | Implementado |
 | Deploy no Render (`$PORT` dinâmico, chave do Firebase como Secret File, EMQX no lugar do Mosquitto) | Pendente |
 | Teste de ponta a ponta com firmware e app | Pendente |
 

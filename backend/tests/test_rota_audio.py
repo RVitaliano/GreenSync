@@ -29,9 +29,10 @@ def client(monkeypatch):
         chamadas["device_id"] = device_id
         return chamadas.get("leitura", LEITURA)
 
-    async def responder_falso(audio, mime, leitura):
+    async def responder_falso(audio, mime, leitura, historico=None):
         chamadas["audio"] = audio
         chamadas["mime"] = mime
+        chamadas["historico_recebido"] = historico
         return {
             "texto": "Estou com sede.",
             "pergunta_ouvida": chamadas.get("ouviu", "Como você está?"),
@@ -59,6 +60,16 @@ def client(monkeypatch):
     monkeypatch.setattr(rota, "sintetizar", voz_falsa)
     monkeypatch.setattr(rota, "verificar_limite", limite_falso)
     monkeypatch.setattr(rota, "tratar_acao", rega_falsa)
+
+    async def contexto_falso(device_id):
+        chamadas["contexto_lido"] = device_id
+        return chamadas.get("historico", [])
+
+    async def salvar_falso(device_id, pergunta, resposta):
+        chamadas.setdefault("salvos", []).append((device_id, pergunta, resposta))
+
+    monkeypatch.setattr(rota, "ler_contexto", contexto_falso)
+    monkeypatch.setattr(rota, "salvar_turno", salvar_falso)
     monkeypatch.setattr(settings, "api_key", "segredo")
 
     app = FastAPI()
@@ -232,7 +243,7 @@ def test_limite_estourado_da_429_sem_chamar_o_gemini(client):
 
 
 def test_gemini_fora_do_ar_da_502(client, monkeypatch):
-    async def falha(audio, mime, leitura):
+    async def falha(audio, mime, leitura, historico=None):
         raise IAError("nenhum modelo respondeu")
 
     monkeypatch.setattr(rota, "responder_audio", falha)
@@ -249,6 +260,7 @@ def test_voz_fora_do_ar_da_502(client, monkeypatch):
     r = post(client)
     assert r.status_code == 502
     assert r.json()["detail"] == "voz indisponível"
+    assert "salvos" not in client.chamadas        # sem voz, a troca não aconteceu
 
 
 # ---------- rega por voz (REQ-FUNC-011) ----------
@@ -298,3 +310,46 @@ def test_debug_mostra_a_frase_efetivamente_falada(client):
                                          "resultado": "agendada", "id": "ag1"}
     r = post(client, url="/audio?debug=true")
     assert unquote(r.headers["X-Texto"]) == "Pode deixar, vou me regar agora por 5 segundos."
+
+
+# ---------- contexto da conversa (REQ-FUNC-008) ----------
+
+def test_conversa_recente_vai_para_o_modelo(client):
+    historico = [{"pergunta": "Qual a temperatura?", "resposta": "Uns 24 graus."}]
+    client.chamadas["historico"] = historico
+    post(client)
+    assert client.chamadas["contexto_lido"] == "vaso-01"
+    assert client.chamadas["historico_recebido"] == historico
+
+
+def test_troca_e_guardada_com_a_transcricao_e_a_frase_falada(client):
+    client.chamadas["ouviu"] = "Qual a temperatura?"
+    post(client)
+    assert client.chamadas["salvos"] == [("vaso-01", "Qual a temperatura?", "Estou com sede.")]
+
+
+def test_na_rega_por_voz_guarda_a_frase_oficial(client):
+    client.chamadas["ouviu"] = "Rega daqui a um minuto"
+    client.chamadas["acao"] = PEDIDO
+    client.chamadas["rega_resultado"] = {"fala": "Combinado, vou regar daqui a 1 minuto por 5 segundos.",
+                                         "resultado": "agendada", "id": "ag1"}
+    post(client)
+    assert client.chamadas["salvos"][0][2] == "Combinado, vou regar daqui a 1 minuto por 5 segundos."
+
+
+def test_silencio_chega_vazio_ao_salvar_que_nao_guarda(client):
+    # A rota sempre chama salvar_turno; é ele quem ignora pergunta vazia (ver test_contexto).
+    client.chamadas["ouviu"] = ""
+    post(client)
+    assert client.chamadas["salvos"][0][1] == ""
+
+
+def test_audio_invalido_nao_toca_no_contexto(client):
+    post(client, corpo=b"isso nao e um wav")
+    assert "contexto_lido" not in client.chamadas
+
+
+def test_limite_estourado_nao_toca_no_contexto(client):
+    client.chamadas["espera"] = 30
+    post(client)
+    assert "contexto_lido" not in client.chamadas and "salvos" not in client.chamadas

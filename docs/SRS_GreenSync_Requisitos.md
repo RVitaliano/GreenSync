@@ -272,7 +272,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Diferencial do produto; objetivo central da entrega.
 - Acceptance Criteria: Pergunta como "como está minha planta?" resulta em resposta coerente com os dados atuais de pH/umidade/temperatura; se um dado faltar, a resposta diz que não sabe, sem inventar valores.
 - Verification Method: Demonstration
-- More Information: Entrada de áudio direta no Gemini (sem STT separado) validada em testes; TTS pelo Gemini (ADR-018). O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis; o LLM apenas dá a voz. O contexto curto da conversa ficará no Redis (ainda não implementado, opcional). Se o dado estiver velho ou o vaso offline, a planta avisa em vez de falar como se fosse de agora (Arc42, 8.7). Pedidos de rega seguem o REQ-FUNC-011. A troca de tela do display segue o REQ-FUNC-016.
+- More Information: Entrada de áudio direta no Gemini (sem STT separado) validada em testes; TTS pelo Gemini (ADR-018). O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis; o LLM apenas dá a voz. O contexto curto da conversa (últimas 3 trocas, 5 min de validade) fica no Redis e só ajuda a entender referências; os números vêm sempre dos dados atuais. Se o dado estiver velho ou o vaso offline, a planta avisa em vez de falar como se fosse de agora (Arc42, 8.7). Pedidos de rega seguem o REQ-FUNC-011. A troca de tela do display segue o REQ-FUNC-016.
 
 - ID: REQ-FUNC-009
 - Title: Mute físico do microfone
@@ -483,7 +483,7 @@ As respostas são totalmente automatizadas, sem revisão humana antes de cada re
 | REQ-FUNC-005 | Demonstration | [A DEFINIR] | Não iniciado | |
 | REQ-FUNC-006 | Demonstration | [A DEFINIR] | Não iniciado | |
 | REQ-FUNC-007 | Test | `tests/test_frescor.py`, `tests/test_estado.py` | Em andamento (backend: status online/offline e frescor dos dados verificados; falta o teste do Last Will com o firmware e a indicação no app) | Testes automatizados; cenários reais (offline, dado velho, recuperação) com Mosquitto e Firestore, novembro/2026 |
-| REQ-FUNC-008 | Demonstration | `tests/test_responder.py`, `tests/test_prompt.py`, `tests/manual_gemini.py`, `tests/manual_audio.py` | Em andamento (assistente em texto e em áudio funcionando no backend com o Gemini real; falta o S3 e o teste com voz de celular e ruído) | Respostas reais do Gemini e WAVs de resposta gerados nos testes manuais, novembro/2026 |
+| REQ-FUNC-008 | Demonstration | `tests/test_responder.py`, `tests/test_prompt.py`, `tests/test_contexto.py`, `tests/manual_gemini.py`, `tests/manual_audio.py` | Em andamento (assistente em texto e em áudio funcionando no backend com o Gemini real; falta o S3 e o teste com voz de celular e ruído) | Respostas reais do Gemini e WAVs de resposta gerados nos testes manuais; contexto verificado por testes automatizados e contra um Redis real (5 trocas guardadas, 3 lembradas, prazo de 300 s), novembro/2026 |
 | REQ-FUNC-009 | Inspection | [A DEFINIR] | Não iniciado | |
 | REQ-FUNC-010 | Test | [A DEFINIR] | Não iniciado (V2) | |
 | REQ-FUNC-011 | Test | `tests/test_regras.py`, `tests/test_servico.py`, `tests/test_agendador.py`, `tests/test_mqtt_comando.py`, `tests/manual_rega.py` | Em andamento (validação, agendamento e publicação do comando verificados por testes automatizados; falta rodar `manual_rega.py` com o Gemini real e executar com o vaso físico) | Testes automatizados; documento de agendamento criado no Firestore real, novembro/2026 |
@@ -493,7 +493,7 @@ As respostas são totalmente automatizadas, sem revisão humana antes de cada re
 | REQ-FUNC-015 | Test | `tests/test_limite.py`, `tests/test_rota_perguntar.py`, `tests/test_rota_audio.py` | Verificado no backend | Execução real com Redis: 200, 200, 200, 429, 429 (limite reduzido para o teste); testes automatizados, novembro/2026 |
 | REQ-FUNC-016 | Demonstration | `tests/test_tela.py`, `tests/test_rota_audio.py` | Em andamento (backend decide e devolve `X-Tela` e `X-Dados`; falta o display do S3) | Testes automatizados, novembro/2026 |
 
-Suíte automatizada do backend: 274 testes (pytest), todos passando em novembro/2026. Para rodar: `docker compose run --rm backend python -m pytest tests/ -v`. Os scripts `tests/manual_gemini.py`, `tests/manual_audio.py` e `tests/manual_rega.py` gastam cota do Gemini e por isso não rodam no pytest.
+Suíte automatizada do backend: 311 testes (pytest), todos passando em novembro/2026. Para rodar: `docker compose run --rm backend python -m pytest tests/ -v`. Os scripts `tests/manual_gemini.py`, `tests/manual_audio.py` e `tests/manual_rega.py` gastam cota do Gemini e por isso não rodam no pytest.
 
 ## 5. Appendixes
 

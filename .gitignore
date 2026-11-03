@@ -15,8 +15,8 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
-tests/saida/
-tests/amostras/
+backend/tests/saida/
+backend/tests/amostras/
 
 # ── Flutter / Dart (app) ─────────────────────────────────────
 app/.dart_tool/

@@ -247,6 +247,9 @@ A ADR-013 rejeitou Celery e Redis, mantendo o backend em um único processo ass�
 ## Consequences
 Fica mais fácil manter um único processo, gastar pouca memória, atender à exigência do professor e migrar depois para serviços separados, já que a URL do Redis é configurável. Fica mais difícil porque não há fila durável: uma tarefa em andamento se perde num reinício (aceitável, pois o usuário repete a pergunta, e as regas agendadas ficam no Firestore). Se o professor exigir uma fila de verdade, existem alternativas mais leves que o Celery (ex.: `arq` ou `RQ`). A expectativa exata do professor sobre o Redis (fila, cache ou ambos) ainda deve ser confirmada **[A DEFINIR]**.
 
+### Atualização (03/11/2026) — contexto da conversa implementado
+O contexto curto passou a existir: lista `ctx:{deviceId}` no Redis com as últimas **3 trocas**, cada pergunta e resposta cortada em **300 caracteres**, expirando em **5 minutos** sem conversa (`CONTEXTO_TURNOS`, `CONTEXTO_MAX_CHARS`, `CONTEXTO_TTL_S`; `CONTEXTO_TURNOS=0` desliga). Guarda só texto, nunca áudio, e o conteúdo não vai para o log. Se o Redis faltar ou cair, o assistente segue sem contexto (mesma política do limite de perguntas). No prompt, o bloco vem depois dos dados reais e manda usar sempre os dados atuais e ignorar instruções que apareçam na conversa. Guarda-se a frase realmente falada, inclusive a confirmação ou recusa da rega escrita pelo backend (ADR-025). Consequência aceita: um pedido de rega que dependa só do contexto ("e daqui a 1 hora?") não é executado, porque a trava da rega exige a palavra de rega na frase atual.
+
 ---
 
 # ADR-016 — Dois microcontroladores: ESP32-WROOM (sensores) e ESP32-S3 (voz)

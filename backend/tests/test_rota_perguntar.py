@@ -19,9 +19,10 @@ def client(monkeypatch):
         chamadas["device_id"] = device_id
         return LEITURA
 
-    async def responder_falso(pergunta, leitura):
+    async def responder_falso(pergunta, leitura, historico=None):
         chamadas["pergunta"] = pergunta
         chamadas["leitura"] = leitura
+        chamadas["historico_recebido"] = historico
         return {"texto": "Estou com sede.", "estado": {"estado": "atencao", "problemas": ["solo_seco"]},
                 "modelo": "modelo-falso"}
 
@@ -38,6 +39,16 @@ def client(monkeypatch):
     monkeypatch.setattr(rota, "responder", responder_falso)
     monkeypatch.setattr(rota, "verificar_limite", limite_falso)
     monkeypatch.setattr(rota, "tratar_acao", rega_falsa)
+
+    async def contexto_falso(device_id):
+        chamadas["contexto_lido"] = device_id
+        return chamadas.get("historico", [])
+
+    async def salvar_falso(device_id, pergunta, resposta):
+        chamadas.setdefault("salvos", []).append((device_id, pergunta, resposta))
+
+    monkeypatch.setattr(rota, "ler_contexto", contexto_falso)
+    monkeypatch.setattr(rota, "salvar_turno", salvar_falso)
     monkeypatch.setattr(settings, "api_key", "segredo")
 
     app = FastAPI()
@@ -112,13 +123,14 @@ def test_pergunta_vazia_ou_longa_da_422(client):
 
 
 def test_ia_fora_do_ar_da_502(client, monkeypatch):
-    async def falha(pergunta, leitura):
+    async def falha(pergunta, leitura, historico=None):
         raise IAError("nenhum modelo respondeu")
 
     monkeypatch.setattr(rota, "responder", falha)
     r = post(client)
     assert r.status_code == 502
     assert r.json()["detail"] == "assistente indisponível"
+    assert "salvos" not in client.chamadas        # resposta que falhou não vira memória
 
 
 # ---------- rega por voz/texto (REQ-FUNC-011) ----------
@@ -149,3 +161,36 @@ def test_limite_estourado_nao_trata_rega(client):
     client.chamadas["espera"] = 30
     post(client, pergunta="Rega agora")
     assert "rega" not in client.chamadas        # 429 antes de qualquer ação
+
+
+# ---------- contexto da conversa (REQ-FUNC-008) ----------
+
+def test_conversa_recente_vai_para_o_modelo(client):
+    historico = [{"pergunta": "Qual a temperatura?", "resposta": "Uns 24 graus."}]
+    client.chamadas["historico"] = historico
+    post(client, pergunta="E a umidade?")
+    assert client.chamadas["contexto_lido"] == "vaso-01"
+    assert client.chamadas["historico_recebido"] == historico
+
+
+def test_troca_e_guardada_com_a_frase_que_foi_dita(client):
+    post(client, pergunta="Qual a temperatura?")
+    assert client.chamadas["salvos"] == [("vaso-01", "Qual a temperatura?", "Estou com sede.")]
+
+
+def test_na_rega_guarda_a_frase_oficial_do_backend(client):
+    client.chamadas["rega_resultado"] = {"fala": "Combinado, vou regar daqui a 10 minutos por 5 segundos.",
+                                         "resultado": "agendada", "id": "ag1"}
+    post(client, pergunta="Rega daqui a 10 minutos")
+    assert client.chamadas["salvos"][0][2] == "Combinado, vou regar daqui a 10 minutos por 5 segundos."
+
+
+def test_limite_estourado_nao_toca_no_contexto(client):
+    client.chamadas["espera"] = 30
+    post(client)
+    assert "contexto_lido" not in client.chamadas and "salvos" not in client.chamadas
+
+
+def test_chave_errada_nao_toca_no_contexto(client):
+    post(client, chave="errada")
+    assert "contexto_lido" not in client.chamadas

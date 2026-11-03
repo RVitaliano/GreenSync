@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     limite_perguntas: int = 10   # perguntas permitidas por janela, por chave de API
     janela_limite_s: int = 60    # tamanho da janela, em segundos
 
+    # --- Contexto curto da conversa no Redis (REQ-FUNC-008, ADR-015) ---
+    contexto_turnos: int = 3        # quantas trocas (pergunta + resposta) lembrar; 0 = desliga
+    contexto_ttl_s: int = 300       # esquece tudo depois de 5 min sem conversa
+    contexto_max_chars: int = 300   # corta cada pergunta/resposta guardada neste tamanho
+
     # App
     log_level: str = "INFO"
 

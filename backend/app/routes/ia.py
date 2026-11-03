@@ -1,4 +1,5 @@
 """Rota de texto do assistente (ADR-018, camada 1: testável sem hardware)."""
+import asyncio
 import logging
 
 from fastapi import APIRouter, Header, HTTPException
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agenda.servico import tratar_acao
 from app.ai.responder import IAError, responder
 from app.ai.tela import decidir_tela
+from app.contexto import ler_contexto, salvar_turno
 from app.firebase_client import ler_leitura_atual
 from app.limite import verificar_limite
 from app.seguranca import DEVICE_ID_PADRAO, chave_valida
@@ -34,10 +36,13 @@ async def perguntar(body: PerguntaIn, x_api_key: str = Header(default="")):
             headers={"Retry-After": str(espera)},
         )
 
-    leitura = await ler_leitura_atual(body.device_id)
+    # Dados do vaso e conversa recente, buscados ao mesmo tempo.
+    leitura, historico = await asyncio.gather(
+        ler_leitura_atual(body.device_id), ler_contexto(body.device_id)
+    )
 
     try:
-        r = await responder(body.pergunta, leitura)
+        r = await responder(body.pergunta, leitura, historico=historico)
     except IAError as e:
         log.error("IA falhou: %s", e)
         raise HTTPException(status_code=502, detail="assistente indisponível")
@@ -45,8 +50,11 @@ async def perguntar(body: PerguntaIn, x_api_key: str = Header(default="")):
     # Pedido de rega/cancelamento: o backend valida e responde com a frase oficial.
     rega = await tratar_acao(r.get("acao"), body.pergunta, body.device_id, leitura, r["estado"], "texto")
 
+    texto = rega["fala"] if rega else r["texto"]
+    await salvar_turno(body.device_id, body.pergunta, texto)   # a planta lembra desta troca
+
     return {
-        "texto": rega["fala"] if rega else r["texto"],
+        "texto": texto,
         "estado": r["estado"],
         "tela": decidir_tela(body.pergunta),
         "modelo": r["modelo"],
