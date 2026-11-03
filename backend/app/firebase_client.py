@@ -53,6 +53,15 @@ def _save_status_sync(device_id: str, status: str) -> None:
     db.collection("devices").document(device_id).set({"status": status}, merge=True)
 
 
+def _read_current_sync(device_id: str) -> dict | None:
+    """Campo `leitura_atual` do dispositivo, ou None se ele ainda não existe."""
+    db = init_firebase()
+    doc = db.collection("devices").document(device_id).get()
+    if not doc.exists:
+        return None
+    return (doc.to_dict() or {}).get("leitura_atual")
+
+
 # O SDK do Firestore é síncrono; to_thread evita travar o loop do MQTT/FastAPI.
 async def save_reading(device_id: str, reading: SensorReading) -> None:
     await asyncio.to_thread(_save_reading_sync, device_id, reading)
@@ -62,3 +71,8 @@ async def save_reading(device_id: str, reading: SensorReading) -> None:
 async def save_status(device_id: str, status: str) -> None:
     await asyncio.to_thread(_save_status_sync, device_id, status)
     logger.info("[%s] status '%s' gravado no Firestore", device_id, status)
+
+
+async def ler_leitura_atual(device_id: str) -> dict | None:
+    """Usada pelo assistente de IA para saber como a planta está agora."""
+    return await asyncio.to_thread(_read_current_sync, device_id)
