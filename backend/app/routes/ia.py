@@ -9,6 +9,7 @@ from app.ai.responder import IAError, responder
 from app.ai.tela import decidir_tela
 from app.config import settings
 from app.firebase_client import ler_leitura_atual
+from app.limite import verificar_limite
 
 log = logging.getLogger("greensync.ia")
 router = APIRouter()
@@ -33,6 +34,15 @@ def _chave_valida(recebida: str) -> bool:
 async def perguntar(body: PerguntaIn, x_api_key: str = Header(default="")):
     if not _chave_valida(x_api_key):
         raise HTTPException(status_code=401, detail="X-API-Key inválida")
+
+    # Só chega aqui quem tem chave válida, então chave errada não gasta o limite.
+    espera = await verificar_limite(x_api_key)
+    if espera is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="limite de perguntas atingido, tente de novo em instantes",
+            headers={"Retry-After": str(espera)},
+        )
 
     leitura = await ler_leitura_atual(body.device_id)
 

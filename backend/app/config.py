@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # extra="ignore": variáveis do .env que ainda não estão declaradas aqui
-    # (ex.: REDIS_URL, que entra depois) não derrubam o backend na inicialização.
+    # não derrubam o backend na inicialização.
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -43,6 +43,12 @@ class Settings(BaseSettings):
 
     # --- API HTTP ---
     api_key: str = ""  # se vazia, a rota fica aberta (só para desenvolvimento)
+
+    # --- Redis e limite de perguntas (REQ-FUNC-015) ---
+    # Ex.: redis://redis:6379/0. Vazia = sem Redis, e o limite fica DESLIGADO.
+    redis_url: str = ""
+    limite_perguntas: int = 10   # perguntas permitidas por janela, por chave de API
+    janela_limite_s: int = 60    # tamanho da janela, em segundos
 
     # App
     log_level: str = "INFO"
