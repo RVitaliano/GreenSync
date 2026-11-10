@@ -12,15 +12,30 @@ from app.redis_client import close_redis
 from app.routes.audio import router as audio_router
 from app.routes.ia import router as ia_router
 
-logging.basicConfig(level=logging.INFO)
+
+def nivel_de_log(nome: str) -> int:
+    """LOG_LEVEL em número do logging. Nome desconhecido não derruba o backend: vale INFO."""
+    nivel = logging.getLevelName((nome or "").strip().upper())
+    return nivel if isinstance(nivel, int) else logging.INFO
+
+
+logging.basicConfig(level=nivel_de_log(settings.log_level))
 logger = logging.getLogger("greensync")
+
+
+def avisar_configuracao() -> None:
+    """Avisos de inicialização para configurações que deixam o backend menos protegido."""
+    if not settings.redis_url:
+        logger.warning("REDIS_URL vazia: o limite de perguntas está DESLIGADO")
+    if not settings.api_key:
+        logger.warning("API_KEY vazia: /perguntar e /audio estão ABERTAS, sem autenticação "
+                       "(só para desenvolvimento)")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_firebase()
-    if not settings.redis_url:
-        logger.warning("REDIS_URL vazia: o limite de perguntas está DESLIGADO")
+    avisar_configuracao()
     task = asyncio.create_task(run_mqtt_subscriber())
     try:
         await agendador.iniciar()   # recarrega as regas pendentes (REQ-FUNC-012)

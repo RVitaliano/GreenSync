@@ -82,16 +82,28 @@ class Agendador:
     async def iniciar(self) -> None:
         """Recarrega as regas ao subir o backend (chamado uma vez no lifespan)."""
         for device_id in await self.repo.devices():
-            # Ficou "executando" quando o processo caiu: não sabemos se o comando saiu.
-            # Marcar como falhou é o lado seguro (nunca repete).
-            for ag in await self.repo.por_status(device_id, "executando"):
-                await self.repo.mudar_status(device_id, ag["id"], ("executando",), "falhou",
-                                             "interrompida por reinício do backend")
-                log.warning("[%s] rega %s estava executando no reinício: marcada como falhou",
-                            device_id, ag["id"])
-            for ag in await self.repo.por_status(device_id, "pendente"):
-                self._iniciar_tarefa(device_id, ag["id"], ag["quando"], ag.get("duracao_s", settings.rega_duracao_padrao_s))
+            # Um vaso (ou um documento) com problema não pode impedir que as regas
+            # dos outros sejam recarregadas: senão elas ficariam paradas até o próximo reinício.
+            try:
+                await self._recarregar(device_id)
+            except Exception:
+                log.exception("[%s] não consegui recarregar as regas deste vaso", device_id)
         log.info("Agendador iniciado: %d rega(s) pendente(s)", len(self._tarefas))
+
+    async def _recarregar(self, device_id: str) -> None:
+        # Ficou "executando" quando o processo caiu: não sabemos se o comando saiu.
+        # Marcar como falhou é o lado seguro (nunca repete).
+        for ag in await self.repo.por_status(device_id, "executando"):
+            await self.repo.mudar_status(device_id, ag["id"], ("executando",), "falhou",
+                                         "interrompida por reinício do backend")
+            log.warning("[%s] rega %s estava executando no reinício: marcada como falhou",
+                        device_id, ag["id"])
+        for ag in await self.repo.por_status(device_id, "pendente"):
+            try:
+                self._iniciar_tarefa(device_id, ag["id"], ag["quando"],
+                                     ag.get("duracao_s", settings.rega_duracao_padrao_s))
+            except Exception:
+                log.exception("[%s] rega %s com dados inválidos, ignorada", device_id, ag.get("id"))
 
     async def parar(self) -> None:
         """Para as contagens (as regas continuam `pendente` no Firestore e voltam no próximo start)."""
@@ -136,6 +148,13 @@ class Agendador:
             raise
         except Exception:
             log.exception("[%s] erro inesperado na rega %s", device_id, ag_id)
+            # Se o erro veio depois de reivindicar, o documento ficaria "executando" até o
+            # próximo reinício (e contando para o intervalo mínimo). Antes da reivindicação
+            # o status é "pendente" e esta chamada não muda nada.
+            try:
+                await self.repo.mudar_status(device_id, ag_id, ("executando",), "falhou", "erro interno")
+            except Exception:
+                log.exception("[%s] não consegui marcar a rega %s como falhou", device_id, ag_id)
             return "falhou", "erro interno"
 
     async def _disparar(self, device_id: str, ag_id: str, duracao_s: int) -> tuple[str, str | None]:
@@ -146,6 +165,15 @@ class Agendador:
 
         # 2) Confere de novo na hora: o vaso pode ter caído ou o solo encharcado desde o pedido.
         motivo = None
+        # Defesa em profundidade: a duração vem do Firestore (que o app também escreve).
+        # Valor torto ou acima do limite configurado nunca vira comando para a bomba.
+        if (isinstance(duracao_s, bool) or not isinstance(duracao_s, int)
+                or duracao_s <= 0 or duracao_s > settings.rega_duracao_max_s):
+            motivo = "a duração da rega é inválida"
+            await self.repo.mudar_status(device_id, ag_id, ("executando",), "falhou", motivo)
+            log.warning("[%s] rega %s não executada: duração inválida (%r)", device_id, ag_id, duracao_s)
+            return "falhou", motivo
+
         leitura = await self.ler_leitura(device_id)
         estado = avaliar_estado(leitura)
         solo = (leitura or {}).get("umidade_solo")

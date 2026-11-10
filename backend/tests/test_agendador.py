@@ -206,3 +206,76 @@ async def test_aguardar_devolve_none_se_demora_demais(m):
     ag_id = await m.ag.agendar("vaso-01", pedido(900), "voz")
     assert await m.ag.aguardar("vaso-01", ag_id, timeout_s=0.1) is None
     await m.ag.parar()
+
+# ---------- erros no meio do caminho (rega nunca fica presa em "executando") ----------
+
+async def test_erro_depois_de_reivindicar_nao_deixa_a_rega_presa_em_executando(m):
+    async def quebra(device_id):
+        raise RuntimeError("firestore caiu")
+
+    m.ag.ler_leitura = quebra
+    ag_id, final = await rodar(m)
+    assert final == ("falhou", "erro interno")
+    assert m.repo.status(ag_id) == "falhou"          # antes ficava "executando" até o próximo reinício
+    assert m.publicados == []
+
+
+async def test_erro_ao_marcar_falhou_nao_derruba_a_tarefa(m):
+    async def quebra(device_id):
+        raise RuntimeError("firestore caiu")
+
+    original = m.repo.mudar_status
+
+    async def mudar_quebrado(device_id, ag_id, de, para, motivo=None):
+        if para == "falhou":
+            raise RuntimeError("firestore continua fora")
+        return await original(device_id, ag_id, de, para, motivo)
+
+    m.ag.ler_leitura = quebra
+    m.repo.mudar_status = mudar_quebrado
+    _, final = await rodar(m)
+    assert final == ("falhou", "erro interno")
+
+
+@pytest.mark.parametrize("duracao", [0, -5, 11, 9999, None, "5", 5.5, True])
+async def test_duracao_invalida_vinda_do_firestore_nunca_vira_comando(m, duracao):
+    # settings.rega_duracao_max_s = 10 (padrão). O documento pode ter sido mexido fora do backend.
+    ag_id = await m.ag.agendar("vaso-01", pedido(900), "voz")
+    r = await m.ag._disparar("vaso-01", ag_id, duracao)
+    assert r == ("falhou", "a duração da rega é inválida")
+    assert m.publicados == []
+    assert m.repo.status(ag_id) == "falhou"
+    await m.ag.parar()
+
+
+async def test_duracao_no_limite_ainda_publica(m):
+    ag_id, final = await rodar(m, duracao_s=settings.rega_duracao_max_s)
+    assert final == ("concluida", None)
+    assert m.publicados[0][1]["duracao_s"] == settings.rega_duracao_max_s
+
+
+# ---------- reinício com dados ruins ----------
+
+async def test_reinicio_um_documento_ruim_nao_impede_os_outros(m):
+    m.repo.docs[("vaso-01", "ag-sem-quando")] = {"id": "ag-sem-quando", "duracao_s": 5, "status": "pendente"}
+    m.repo.inserir("ag-boa", agora_utc() + timedelta(hours=1))
+    await m.ag.iniciar()
+    assert "vaso-01/ag-boa" in m.ag._tarefas        # antes: KeyError abortava o iniciar() inteiro
+    assert "vaso-01/ag-sem-quando" not in m.ag._tarefas
+    await m.ag.parar()
+
+
+async def test_reinicio_um_vaso_com_erro_nao_impede_os_outros(m):
+    m.repo.inserir("ag-b", agora_utc() + timedelta(hours=1), device_id="vaso-02")
+    m.repo.inserir("ag-a", agora_utc() + timedelta(hours=1), device_id="vaso-01")
+    original = m.repo.por_status
+
+    async def por_status_quebrado(device_id, status):
+        if device_id == "vaso-01":
+            raise RuntimeError("firestore falhou neste vaso")
+        return await original(device_id, status)
+
+    m.repo.por_status = por_status_quebrado
+    await m.ag.iniciar()
+    assert "vaso-02/ag-b" in m.ag._tarefas
+    await m.ag.parar()

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import ssl
 
 import aiomqtt
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from app.config import settings
 from app.firebase_client import save_reading, save_status
 from app.models import DeviceStatus, SensorReading
+from app.seguranca import DEVICE_ID_PADRAO
 
 logger = logging.getLogger("greensync.mqtt")
 
@@ -54,6 +56,11 @@ async def handle_message(message: aiomqtt.Message) -> None:
         logger.warning("Tópico fora do padrão, ignorado: %s", topic)
         return
     device_id, kind = parsed
+    # Mesma regra das rotas HTTP: o id vira nome de documento no Firestore (vazio, "." e ".."
+    # não são nomes válidos) e um id que a API recusa não teria como ser consultado.
+    if not re.fullmatch(DEVICE_ID_PADRAO, device_id):
+        logger.warning("device_id inválido no tópico, ignorado: %r", topic)
+        return
 
     try:
         if kind == "sensores":
@@ -101,6 +108,11 @@ async def run_mqtt_subscriber() -> None:
 
         except aiomqtt.MqttError as exc:
             logger.warning("Sem conexão com o broker (%s). Tentando de novo em 5s...", exc)
+            await asyncio.sleep(5)
+        except Exception:
+            # Qualquer outro erro não pode matar a tarefa em silêncio: sem ela o backend
+            # para de receber sensores e de publicar comandos, mas segue "no ar".
+            logger.exception("Erro inesperado no assinante MQTT. Tentando de novo em 5s...")
             await asyncio.sleep(5)
         finally:
             _cliente = None

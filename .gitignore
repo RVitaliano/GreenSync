@@ -4,6 +4,8 @@
 !.env.example
 serviceAccountKey.json
 firebase-adminsdk*.json
+*.ogg
+*.wav
 
 # ── Python (backend) ───────────────────────────────────────
 __pycache__/

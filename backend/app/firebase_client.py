@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 import firebase_admin
@@ -24,15 +25,32 @@ def init_firebase():
     return _db
 
 
+# Relógio do ESP fora destes limites (sem NTP, contador desde o boot, lixo) não é confiável.
+TIMESTAMP_MINIMO = int(datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp())
+TIMESTAMP_FUTURO_MAX_S = 3600   # mais que 1 h à frente da hora do servidor
+
+
+def timestamp_confiavel(ts: int | None, agora: float | None = None) -> datetime | None:
+    """Data do `timestamp` do ESP, ou None se faltar ou for absurdo (aí vale a hora do servidor)."""
+    if ts is None:
+        return None
+    agora = time.time() if agora is None else agora
+    if ts < TIMESTAMP_MINIMO or ts > agora + TIMESTAMP_FUTURO_MAX_S:
+        return None
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+
 def _save_reading_sync(device_id: str, reading: SensorReading) -> None:
     db = init_firebase()
     device_ref = db.collection("devices").document(device_id)
 
     data = reading.model_dump(exclude={"timestamp"})
-    if reading.timestamp is not None:
-        ts = datetime.fromtimestamp(reading.timestamp, tz=timezone.utc)
-    else:
-        ts = firestore.SERVER_TIMESTAMP  # ESP sem relógio: usa a hora do servidor
+    ts = timestamp_confiavel(reading.timestamp)
+    if ts is None:
+        ts = firestore.SERVER_TIMESTAMP  # ESP sem relógio ou com relógio absurdo: hora do servidor
+        if reading.timestamp is not None:
+            logger.warning("[%s] timestamp %s fora do razoável, usando a hora do servidor",
+                           device_id, reading.timestamp)
 
     batch = db.batch()
     batch.set(
