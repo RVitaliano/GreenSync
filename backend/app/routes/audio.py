@@ -40,7 +40,7 @@ from app.ai.tela import decidir_tela
 from app.ai.voz import sintetizar
 from app.config import settings
 from app.contexto import ler_contexto, salvar_turno
-from app.firebase_client import ler_leitura_atual
+from app.firebase_client import ler_leitura_segura
 from app.limite import verificar_limite
 from app.seguranca import DEVICE_ID_PADRAO, chave_valida
 
@@ -125,7 +125,7 @@ async def audio(
 
     # Dados do vaso e conversa recente, buscados ao mesmo tempo.
     leitura, historico = await asyncio.gather(
-        ler_leitura_atual(x_device_id), ler_contexto(x_device_id)
+        ler_leitura_segura(x_device_id), ler_contexto(x_device_id)
     )
 
     t0 = time.monotonic()

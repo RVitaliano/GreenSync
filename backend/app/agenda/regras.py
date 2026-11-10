@@ -13,11 +13,30 @@ from app.config import settings
 # Palavras que mostram que a PESSOA pediu para regar. É uma trava extra, independente
 # do LLM: se o modelo "alucinar" uma rega numa pergunta que não pediu isso, a bomba
 # não é acionada.
-_PEDIU_REGA = re.compile(r"\b(reg[aeouáéêó]\w*|molh\w*|irrig\w*|rega)\b", re.IGNORECASE)
+# "regular", "regulamento" e "regada" ficam de fora de propósito.
+_PEDIU_REGA = re.compile(
+    r"\b(reg(?:a|as|am|ar|arem|aria|ando|ou|á|ue|uem)|molh(?:a|ar|e|em|ando|ou)|irrig(?:a|ar|ue|uem|ando|ou))\b",
+    re.IGNORECASE,
+)
+# Palavras que mostram que a PESSOA pediu para cancelar (mesma ideia da trava acima).
+_PEDIU_CANCELAR = re.compile(
+    r"\b(cancel\w*|desmarc\w*|desfaz\w*|desfaç\w*|esquec\w*|n[aã]o\s+(?:precisa|quero)|deixa\s+pra\s+l[aá]|melhor\s+n[aã]o)\b",
+    re.IGNORECASE,
+)
 _HORA = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 # Rega marcada/feita perto de outra conta para o intervalo mínimo.
 STATUS_QUE_CONTAM = ("pendente", "executando", "concluida")
+
+
+# Motivo gravado quando o comando foi tentado e falhou no meio: pode ter chegado ao vaso.
+MOTIVO_INCERTO = "não tenho certeza se o comando chegou ao vaso"
+
+
+def conta_no_intervalo(ag: dict) -> bool:
+    """Se esta rega conta para o intervalo mínimo (inclui falha em que o comando pode ter saído)."""
+    status = ag.get("status")
+    return status in STATUS_QUE_CONTAM or (status == "falhou" and ag.get("motivo") == MOTIVO_INCERTO)
 
 
 class Recusa(Exception):
@@ -38,6 +57,10 @@ class Pedido:
 
 def pessoa_pediu_rega(texto: str) -> bool:
     return bool(_PEDIU_REGA.search(texto or ""))
+
+
+def pessoa_pediu_cancelar(texto: str) -> bool:
+    return bool(_PEDIU_CANCELAR.search(texto or ""))
 
 
 def fuso():
@@ -104,7 +127,7 @@ def checar_regras(pedido: Pedido, leitura: dict | None, estado: dict, vizinhos: 
 
     minimo = settings.rega_intervalo_min_s
     for v in vizinhos:
-        if v.get("status") in STATUS_QUE_CONTAM:
+        if conta_no_intervalo(v):
             distancia = abs((v["quando"] - pedido.quando).total_seconds())
             if distancia < minimo:
                 raise Recusa("intervalo",

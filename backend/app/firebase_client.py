@@ -101,5 +101,21 @@ async def save_status(device_id: str, status: str) -> None:
 
 
 async def ler_leitura_atual(device_id: str) -> dict | None:
-    """Usada pelo assistente de IA para saber como a planta está agora."""
-    return await asyncio.to_thread(_read_current_sync, device_id)
+    """Leitura atual do vaso, com prazo (`firestore_timeout_s`). Levanta erro/TimeoutError.
+
+    Versão usada pelo agendador, que precisa saber que a leitura falhou.
+    """
+    return await asyncio.wait_for(
+        asyncio.to_thread(_read_current_sync, device_id),
+        timeout=settings.firestore_timeout_s,
+    )
+
+
+async def ler_leitura_segura(device_id: str) -> dict | None:
+    """Usada pelas rotas: Firestore lento ou fora vira "sem dados" (None), nunca erro."""
+    try:
+        return await ler_leitura_atual(device_id)
+    except Exception as e:
+        logger.error("[%s] não consegui ler a leitura atual (%s); seguindo sem dados",
+                     device_id, type(e).__name__)
+        return None

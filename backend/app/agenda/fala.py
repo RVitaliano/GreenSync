@@ -51,7 +51,8 @@ def cancelamento(quando: datetime, restantes: int) -> str:
 
 NADA_A_CANCELAR = "Não tem nenhuma rega marcada para cancelar."
 NAO_ENTENDI = "Não entendi se você queria me regar. Pode repetir o pedido?"
-ERRO = "Não consegui marcar a rega agora. Tente de novo em instantes."
+NAO_ENTENDI_CANCELAR = "Não entendi se você queria cancelar a rega. Pode repetir o pedido?"
+ERRO ="Não consegui marcar a rega agora. Tente de novo em instantes."
 
 
 def falha_na_hora(motivo: str) -> str:

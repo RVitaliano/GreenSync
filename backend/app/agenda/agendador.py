@@ -14,7 +14,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from app.agenda.regras import Pedido
+from app.agenda.regras import MOTIVO_INCERTO, Pedido
 from app.ai.estado import avaliar_estado
 from app.config import settings
 
@@ -190,11 +190,21 @@ class Agendador:
         try:
             await self.publicar(device_id, {"acao": "regar", "duracao_s": duracao_s, "id": ag_id})
         except Exception as e:
-            motivo = "não consegui falar com o broker"
+            motivo = MOTIVO_INCERTO if getattr(e, "incerta", False) else "não consegui falar com o broker"
             await self.repo.mudar_status(device_id, ag_id, ("executando",), "falhou", motivo)
             log.error("[%s] rega %s: publicação falhou: %s", device_id, ag_id, e)
             return "falhou", motivo
 
-        await self.repo.mudar_status(device_id, ag_id, ("executando",), "concluida")
         log.info("[%s] rega %s: comando publicado (%ds)", device_id, ag_id, duracao_s)
+        # O comando JÁ saiu. Se o Firestore falhar aqui, nunca devolvemos "falhou" (a pessoa
+        # seria avisada de que não regou, e o erro genérico ainda reescreveria o status):
+        # tenta de novo e, se não der, o documento fica "executando", que também conta no
+        # intervalo mínimo e vira "falhou" só no próximo reinício.
+        for tentativa in (1, 2):
+            try:
+                await self.repo.mudar_status(device_id, ag_id, ("executando",), "concluida")
+                break
+            except Exception:
+                log.exception("[%s] rega %s: não consegui gravar 'concluida' (tentativa %d)",
+                              device_id, ag_id, tentativa)
         return "concluida", None

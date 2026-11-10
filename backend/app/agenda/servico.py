@@ -9,7 +9,8 @@ import logging
 
 from app.agenda import fala
 from app.agenda.agendador import Agendador
-from app.agenda.regras import Recusa, checar_regras, pessoa_pediu_rega, resolver_pedido
+from app.agenda.regras import (Recusa, checar_regras, pessoa_pediu_cancelar,
+                                 pessoa_pediu_rega, resolver_pedido)
 from app.agenda import repositorio
 from app.config import settings
 from app.firebase_client import ler_leitura_atual
@@ -34,7 +35,7 @@ async def tratar_acao(acao: dict | None, fala_usuario: str, device_id: str,
 
     try:
         if tipo == "cancelar":
-            return await _cancelar(device_id)
+            return await _cancelar(fala_usuario, device_id)
         return await _regar(acao, fala_usuario, device_id, leitura, estado, origem)
     except Exception:
         log.exception("[%s] erro ao tratar pedido de rega", device_id)
@@ -67,7 +68,11 @@ async def _regar(acao, fala_usuario, device_id, leitura, estado, origem) -> dict
     return {"fala": texto, "resultado": resultado, "id": ag_id}
 
 
-async def _cancelar(device_id: str) -> dict:
+async def _cancelar(fala_usuario: str, device_id: str) -> dict:
+    # Mesma trava da rega: sem palavra de cancelamento na fala da pessoa, não cancela nada.
+    if not pessoa_pediu_cancelar(fala_usuario):
+        log.warning("[%s] o modelo propôs um cancelamento que a pessoa não pediu: ignorado", device_id)
+        return {"fala": fala.NAO_ENTENDI_CANCELAR, "resultado": "ignorada", "id": None}
     achou = await agendador.cancelar_proxima(device_id)
     if achou is None:
         return {"fala": fala.NADA_A_CANCELAR, "resultado": "nada_a_cancelar", "id": None}

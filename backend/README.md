@@ -107,7 +107,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (382 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (440 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -141,7 +141,7 @@ Contrato completo (e o que o firmware do S3 precisa saber, como o timeout de pel
 
 ### Rega por voz
 
-Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Ver Seção 8.5 do Arc42.
+Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s; a demonstração usa 15 s no `.env`), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Ver Seção 8.5 do Arc42.
 
 ## Contrato MQTT
 
@@ -193,7 +193,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `MQTT_TOPIC_COMANDOS` | Tópico dos comandos (`greensync/{device_id}/comandos`) |
 | `FIREBASE_CREDENTIALS_PATH` | Caminho da chave de serviço do Firebase |
 | `GEMINI_API_KEY` | Chave da API do Gemini |
-| `GEMINI_MODEL` / `GEMINI_MODEL_FALLBACK` | Modelo principal e reserva (se o principal der timeout ou 5xx) |
+| `GEMINI_MODEL` / `GEMINI_MODEL_FALLBACK` | Modelo principal (padrão `gemini-3.5-flash-lite`) e reserva (`gemini-3.1-flash-lite`, usada se o principal der timeout ou 5xx) |
 | `TTS_MODEL` / `TTS_MODEL_FALLBACK` | Modelos da voz (opcionais) |
 | `TTS_VOICE` / `TTS_ESTILO` / `TTS_SAMPLE_RATE` | Voz, estilo de fala e taxa de amostragem da resposta (opcionais) |
 | `API_KEY` | Chave exigida no `X-API-Key` (vazia = rotas abertas, só para desenvolvimento) |
@@ -203,7 +203,8 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `LEITURA_VELHA_APOS_S` | Segundos sem leitura para os dados serem tratados como velhos (padrão 120) |
 | `REGA_ATRASO_MAX_S`, `REGA_DURACAO_MAX_S`, `REGA_DURACAO_PADRAO_S`, `REGA_INTERVALO_MIN_S`, `REGA_TOLERANCIA_S` | Limites da rega por voz |
 | `FUSO_UTC_H` | Fuso para "às 15h" (Brasília = -3) |
-| `GEMINI_TIMEOUT_S` / `GEMINI_TIMEOUT_AUDIO_S` / `TTS_TIMEOUT_S` | Prazo por chamada ao Gemini, em segundos: texto (padrão 8), áudio (12) e voz (15) |
+| `GEMINI_TIMEOUT_S` / `GEMINI_TIMEOUT_AUDIO_S` / `TTS_TIMEOUT_S` | Prazo por chamada ao Gemini, em segundos: texto (padrão 8), áudio (25) e voz (15) |
+| `FIRESTORE_TIMEOUT_S` | Prazo para ler os dados do vaso no Firestore (padrão 5 s); passou disso, a pergunta segue como "sem dados" |
 | `AUDIO_MAX_BYTES` / `AUDIO_MAX_S` | Tamanho (padrão 1000000 bytes) e duração (15 s) máximos do áudio recebido |
 | `TOM_PLANTA` | `planta` (divertido, padrão) ou `informativo` |
 | `SOLO_SECO_ABAIXO` / `SOLO_ENCHARCADO_ACIMA` / `TEMP_MIN` / `TEMP_MAX` / `PH_MIN` / `PH_MAX` | Limiares do estado da planta (padrão 30 %, 80 %, 10 °C, 35 °C, 5,5 e 7,5) |

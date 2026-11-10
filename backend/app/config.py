@@ -24,13 +24,13 @@ class Settings(BaseSettings):
 
     # --- IA (Gemini) ---
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
     # Reserva usada se o principal estiver sobrecarregado (503) ou lento (timeout).
-    gemini_model_fallback: str = "gemini-3.5-flash-lite"
+    gemini_model_fallback: str = "gemini-3.1-flash-lite"
     # Tempo máximo de espera por chamada, em segundos. Acima disso, vai para o reserva.
     gemini_timeout_s: float = 8.0
     # Pergunta em áudio demora mais (o modelo ouve e responde), então tem prazo próprio.
-    gemini_timeout_audio_s: float = 12.0
+    gemini_timeout_audio_s: float = 25.0
 
     # --- Voz (TTS): transforma o texto da resposta em áudio ---
     tts_model: str = "gemini-3.8-flash-tts"
@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     temp_max: float = 35.0               # °C
     ph_min: float = 5.5
     ph_max: float = 7.5
+
+    # Leitura do Firestore (dados do vaso) que passar disso é tratada como "sem
+    # dados", para uma pergunta nunca ficar presa esperando o banco.
+    firestore_timeout_s: float = 5.0
 
     # Passou desse tempo sem leitura nova, o dado é tratado como velho e a planta
     # avisa em vez de falar como se fosse de agora. O firmware publica a cada

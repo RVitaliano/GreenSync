@@ -20,7 +20,15 @@ _cliente: aiomqtt.Client | None = None
 
 
 class MqttIndisponivel(Exception):
-    """Sem conexão com o broker no momento de publicar."""
+    """Não foi possível publicar no broker.
+
+    incerta=True quando a publicação chegou a ser tentada e falhou no meio (a mensagem
+    PODE ter sido entregue); False quando com certeza nada foi enviado.
+    """
+
+    def __init__(self, mensagem: str, incerta: bool = False):
+        super().__init__(mensagem)
+        self.incerta = incerta
 
 
 async def publicar_comando(device_id: str, payload: dict) -> None:
@@ -36,7 +44,7 @@ async def publicar_comando(device_id: str, payload: dict) -> None:
     try:
         await cliente.publish(topico, json.dumps(payload), qos=1, retain=False, timeout=5)
     except aiomqtt.MqttError as exc:
-        raise MqttIndisponivel(str(exc)) from exc
+        raise MqttIndisponivel(str(exc), incerta=True) from exc
     logger.info("[%s] comando publicado em %s: %s", device_id, topico, payload)
 
 

@@ -3,13 +3,13 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agenda.servico import tratar_acao
 from app.ai.responder import IAError, responder
 from app.ai.tela import decidir_tela
 from app.contexto import ler_contexto, salvar_turno
-from app.firebase_client import ler_leitura_atual
+from app.firebase_client import ler_leitura_segura
 from app.limite import verificar_limite
 from app.seguranca import DEVICE_ID_PADRAO, chave_valida
 
@@ -20,6 +20,14 @@ router = APIRouter()
 class PerguntaIn(BaseModel):
     device_id: str = Field(pattern=DEVICE_ID_PADRAO)
     pergunta: str = Field(min_length=1, max_length=500)
+
+    @field_validator("pergunta")
+    @classmethod
+    def sem_espacos_nas_pontas(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("a pergunta está vazia")
+        return v
 
 
 @router.post("/perguntar")
@@ -38,7 +46,7 @@ async def perguntar(body: PerguntaIn, x_api_key: str = Header(default="")):
 
     # Dados do vaso e conversa recente, buscados ao mesmo tempo.
     leitura, historico = await asyncio.gather(
-        ler_leitura_atual(body.device_id), ler_contexto(body.device_id)
+        ler_leitura_segura(body.device_id), ler_contexto(body.device_id)
     )
 
     try:

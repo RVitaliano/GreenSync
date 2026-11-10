@@ -52,3 +52,16 @@ async def test_erro_do_broker_vira_erro_proprio(monkeypatch):
     monkeypatch.setattr(mqtt_client, "_cliente", ClienteFalso(erro=aiomqtt.MqttError("caiu")))
     with pytest.raises(mqtt_client.MqttIndisponivel):
         await mqtt_client.publicar_comando("vaso-01", {"acao": "regar"})
+
+async def test_sem_conexao_nao_e_incerta(monkeypatch):
+    monkeypatch.setattr(mqtt_client, "_cliente", None)
+    with pytest.raises(mqtt_client.MqttIndisponivel) as e:
+        await mqtt_client.publicar_comando("vaso-01", {"acao": "regar"})
+    assert e.value.incerta is False
+
+
+async def test_erro_durante_o_publish_e_incerto(monkeypatch):
+    monkeypatch.setattr(mqtt_client, "_cliente", ClienteFalso(erro=aiomqtt.MqttError("timeout")))
+    with pytest.raises(mqtt_client.MqttIndisponivel) as e:
+        await mqtt_client.publicar_comando("vaso-01", {"acao": "regar"})
+    assert e.value.incerta is True

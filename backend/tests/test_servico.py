@@ -194,3 +194,24 @@ async def test_cancelar_nao_exige_palavra_de_rega(m):
     r = await m.tratar({"tipo": "cancelar", "daqui_a_s": None, "as_hora": None, "duracao_s": None},
                        fala_usuario="esquece isso")
     assert r["resultado"] == "nada_a_cancelar"
+
+# ---------- trava do cancelamento ----------
+
+CANCELAR = {"tipo": "cancelar", "daqui_a_s": None, "as_hora": None, "duracao_s": None}
+
+
+@pytest.mark.parametrize("fala", ["Qual a temperatura?", ""])
+async def test_cancelamento_inventado_pelo_modelo_nao_cancela_nada(m, fala):
+    from app.agenda import fala as frases
+    marcada = await m.tratar(regar(daqui_a_s=7200))
+    r = await m.tratar(CANCELAR, fala_usuario=fala)
+    assert r == {"fala": frases.NAO_ENTENDI_CANCELAR, "resultado": "ignorada", "id": None}
+    assert m.repo.status(marcada["id"]) == "pendente"
+    await m.ag.parar()
+
+
+async def test_cancelar_com_pedido_claro_ainda_cancela(m):
+    marcada = await m.tratar(regar(daqui_a_s=7200))
+    r = await m.tratar(CANCELAR, fala_usuario="Pode cancelar a rega")
+    assert r["resultado"] == "cancelada"
+    assert m.repo.status(marcada["id"]) == "cancelada"

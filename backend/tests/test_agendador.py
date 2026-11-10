@@ -279,3 +279,48 @@ async def test_reinicio_um_vaso_com_erro_nao_impede_os_outros(m):
     await m.ag.iniciar()
     assert "vaso-02/ag-b" in m.ag._tarefas
     await m.ag.parar()
+
+
+# ---------- falha incerta e gravação final ----------
+
+class PublicacaoIncerta(Exception):
+    incerta = True
+
+
+async def test_publicacao_incerta_vira_falhou_e_conta_no_intervalo(m):
+    from app.agenda.regras import MOTIVO_INCERTO, conta_no_intervalo
+
+    async def publica_e_cai(device_id, payload):
+        raise PublicacaoIncerta("caiu no meio")
+
+    m.ag.publicar = publica_e_cai
+    ag_id, final = await rodar(m)
+    assert final == ("falhou", MOTIVO_INCERTO)
+    assert conta_no_intervalo(m.repo.docs[("vaso-01", ag_id)])
+
+
+async def test_falha_comum_de_publicacao_nao_conta_no_intervalo(m):
+    from app.agenda.regras import conta_no_intervalo
+
+    m.mqtt_cai = True       # ConnectionError, sem atributo "incerta"
+    ag_id, final = await rodar(m)
+    assert final == ("falhou", "não consegui falar com o broker")
+    assert not conta_no_intervalo(m.repo.docs[("vaso-01", ag_id)])
+
+
+async def test_erro_ao_gravar_concluida_nao_vira_falhou(m):
+    from app.agenda.regras import conta_no_intervalo
+
+    original = m.repo.mudar_status
+
+    async def mudar(device_id, ag_id, de, para, motivo=None):
+        if para == "concluida":
+            raise RuntimeError("firestore caiu")
+        return await original(device_id, ag_id, de, para, motivo)
+
+    m.repo.mudar_status = mudar
+    ag_id, final = await rodar(m)
+    assert final == ("concluida", None)          # o comando saiu: nunca avisar "não consegui"
+    assert len(m.publicados) == 1
+    assert m.repo.status(ag_id) == "executando"
+    assert conta_no_intervalo(m.repo.docs[("vaso-01", ag_id)])

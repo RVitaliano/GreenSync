@@ -64,3 +64,24 @@ def test_conversa_entra_no_prompt_de_texto_e_de_audio(audio):
     assert "E a umidade?" in p
     # fica depois dos dados reais e antes das instruções de formato
     assert p.index("DADOS ATUAIS") < p.index("CONVERSA RECENTE") < p.index("PEDIDOS DE REGA")
+
+# ---------- pH nunca arredondado ----------
+
+def test_prompt_tem_a_regra_do_ph():
+    leitura = {"ph": 6.5, "umidade_solo": 40}
+    p = montar_system_prompt(leitura, calcular_estado(leitura))
+    assert "O pH NUNCA se arredonda" in p
+    assert "seis vírgula cinco" in p
+
+
+def test_regra_generica_de_arredondamento_foi_trocada():
+    leitura = {"ph": 6.5, "umidade_solo": 40}
+    p = montar_system_prompt(leitura, calcular_estado(leitura))
+    assert "Arredonde os números ao inteiro" not in p
+    assert "Arredonde a temperatura e as umidades" in p
+
+
+@pytest.mark.parametrize("ph", [6.5, 6.7])
+def test_dados_entregam_o_ph_com_casa_decimal(ph):
+    leitura = {"ph": ph, "umidade_solo": 40, "temperatura_ar": 24}
+    assert f"pH do solo: {ph}" in montar_dados(leitura, calcular_estado(leitura))

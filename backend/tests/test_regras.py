@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.agenda.regras import Pedido, Recusa, checar_regras, pessoa_pediu_rega, resolver_pedido
+from app.agenda.regras import (MOTIVO_INCERTO, Pedido, Recusa, checar_regras, conta_no_intervalo,
+                               pessoa_pediu_cancelar, pessoa_pediu_rega, resolver_pedido)
 from app.ai.estado import avaliar_estado
 from app.config import settings
 
@@ -188,4 +189,62 @@ def test_vizinha_fora_do_intervalo_passa():
 @pytest.mark.parametrize("status", ["cancelada", "expirada", "falhou"])
 def test_vizinha_que_nao_aconteceu_nao_conta(status):
     viz = [{"status": status, "quando": AGORA + timedelta(seconds=60)}]
+    checar(vizinhos=viz)
+
+# ---------- trava de rega e de cancelamento (palavras) ----------
+
+@pytest.mark.parametrize("fala", [
+    "Rega daqui a pouco", "Pode me regar?", "Regue-me por favor", "Regá-la agora",
+    "Me molha um pouco", "Irrigue o vaso", "Quero que você se regue", "Vai regando",
+])
+def test_frases_que_pedem_rega_passam(fala):
+    assert pessoa_pediu_rega(fala)
+
+
+@pytest.mark.parametrize("fala", [
+    "Pode regular a temperatura?", "Qual o regulamento?", "Você foi regada hoje?",
+    "O solo está molhado?", "Que região você é?", "Já foi regado?", "", None,
+])
+def test_frases_que_nao_pedem_rega_nao_passam(fala):
+    assert not pessoa_pediu_rega(fala)
+
+
+@pytest.mark.parametrize("fala", [
+    "Cancela a rega", "Desmarca a rega", "Esquece isso", "Não precisa mais",
+    "Deixa pra lá", "Melhor não", "Desfaz isso",
+])
+def test_frases_que_pedem_cancelar_passam(fala):
+    assert pessoa_pediu_cancelar(fala)
+
+
+@pytest.mark.parametrize("fala", ["Qual a temperatura?", "Rega agora", "", None])
+def test_frases_que_nao_pedem_cancelar_nao_passam(fala):
+    assert not pessoa_pediu_cancelar(fala)
+
+
+# ---------- falha incerta conta no intervalo ----------
+
+@pytest.mark.parametrize("ag,esperado", [
+    ({"status": "pendente"}, True),
+    ({"status": "executando"}, True),
+    ({"status": "concluida"}, True),
+    ({"status": "falhou", "motivo": MOTIVO_INCERTO}, True),
+    ({"status": "falhou", "motivo": "o vaso está desconectado"}, False),
+    ({"status": "falhou"}, False),
+    ({"status": "cancelada"}, False),
+    ({}, False),
+])
+def test_conta_no_intervalo(ag, esperado):
+    assert conta_no_intervalo(ag) is esperado
+
+
+def test_falha_incerta_vizinha_recusa_por_intervalo():
+    viz = [{"status": "falhou", "motivo": MOTIVO_INCERTO, "quando": AGORA - timedelta(seconds=60)}]
+    with pytest.raises(Recusa) as e:
+        checar(vizinhos=viz)
+    assert e.value.codigo == "intervalo"
+
+
+def test_falha_comum_vizinha_nao_recusa():
+    viz = [{"status": "falhou", "motivo": "o vaso está desconectado", "quando": AGORA - timedelta(seconds=60)}]
     checar(vizinhos=viz)

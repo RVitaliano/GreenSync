@@ -55,7 +55,7 @@ def client(monkeypatch):
                             "origem": origem}
         return chamadas.get("rega_resultado")   # None = não houve pedido de rega
 
-    monkeypatch.setattr(rota, "ler_leitura_atual", leitura_falsa)
+    monkeypatch.setattr(rota, "ler_leitura_segura", leitura_falsa)
     monkeypatch.setattr(rota, "responder_audio", responder_falso)
     monkeypatch.setattr(rota, "sintetizar", voz_falsa)
     monkeypatch.setattr(rota, "verificar_limite", limite_falso)
@@ -353,3 +353,58 @@ def test_limite_estourado_nao_toca_no_contexto(client):
     client.chamadas["espera"] = 30
     post(client)
     assert "contexto_lido" not in client.chamadas and "salvos" not in client.chamadas
+
+# ---------- falha REAL do Firestore (só a leitura do banco é trocada, não a função das rotas) ----------
+
+def _firestore_real_com(monkeypatch, client, leitura_do_banco):
+    """Usa o ler_leitura_segura de verdade e captura o que o modelo (falso) recebe."""
+    from app import firebase_client
+    recebido = {}
+
+    async def responder_que_anota(audio, mime, leitura, historico=None):
+        recebido["leitura"] = leitura
+        return {"texto": "Não sei como estou.", "pergunta_ouvida": "Como você está?", "acao": None,
+                "estado": {"estado": "sem_dados", "problemas": [], "dados": "sem_dados",
+                           "idade_s": None, "offline": False},
+                "modelo": "modelo-falso"}
+
+    monkeypatch.setattr(rota, "ler_leitura_segura", firebase_client.ler_leitura_segura)
+    monkeypatch.setattr(firebase_client, "_read_current_sync", leitura_do_banco)
+    monkeypatch.setattr(rota, "responder_audio", responder_que_anota)
+    return recebido
+
+
+def test_firestore_com_erro_o_audio_responde_200_com_sem_dados(client, monkeypatch):
+    def quebra(device_id):
+        raise RuntimeError("firestore fora do ar")
+
+    recebido = _firestore_real_com(monkeypatch, client, quebra)
+    r = post(client)
+    assert r.status_code == 200
+    assert r.content == VOZ
+    assert recebido["leitura"] is None                 # o modelo recebe "sem dados"
+
+
+def test_firestore_lento_o_audio_responde_200_com_sem_dados_rapido(client, monkeypatch):
+    import time
+
+    def lenta(device_id):
+        time.sleep(0.4)
+        return LEITURA
+
+    monkeypatch.setattr(settings, "firestore_timeout_s", 0.05)
+    recebido = _firestore_real_com(monkeypatch, client, lenta)
+    # O TestClient espera a thread lenta ao fechar o loop de cada requisição; por isso o
+    # tempo é medido até o modelo ser chamado (num servidor real o loop não fecha).
+    original = rota.responder_audio
+
+    async def anota_hora(*a, **kw):
+        recebido["hora"] = time.monotonic()
+        return await original(*a, **kw)
+
+    monkeypatch.setattr(rota, "responder_audio", anota_hora)
+    t0 = time.monotonic()
+    r = post(client)
+    assert recebido["hora"] - t0 < 0.3
+    assert r.status_code == 200
+    assert recebido["leitura"] is None
