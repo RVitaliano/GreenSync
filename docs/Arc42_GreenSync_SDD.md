@@ -1,6 +1,6 @@
 # Arc42 — Documento de Arquitetura de Software (SDD) — GreenSync
 
-> **Versão 0.5 — 03/11/2026.** Atualizado com o backend implementado (inclui o contexto curto da conversa no Redis): contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
+> **Versão 0.7 — 09/11/2026.** O pH passa a ser falado sempre com o valor exato (Seção 8.6, ADR-027), as rotas ganham testes contra falha real do Firestore (Seção 8.8) e entra a estratégia de testes (Seção 8.10, ADR-028, com o Plano de Testes em formato IEEE 829). Versão anterior: **0.6 — 09/11/2026.** Revisão do backend: trava de palavra também no cancelamento, publicação incerta de comando, Firestore lento tratado como "sem dados", padrões do Gemini e novas limitações conhecidas (Seções 8.5, 8.8 e 11). Versão anterior: **0.5 — 03/11/2026.** Atualizado com o backend implementado (inclui o contexto curto da conversa no Redis): contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
 
 ---
 
@@ -345,7 +345,7 @@ Regras: campos extras são ignorados; payload inválido é registrado em log e d
 | Campo | Tipo | Observação |
 |---|---|---|
 | `acao` | texto | Hoje só `"regar"` |
-| `duracao_s` | inteiro | De 1 a 10 s (o backend já valida) |
+| `duracao_s` | inteiro | De 1 a 10 s por padrão (limite configurável no backend; a demonstração usa 15 s). O firmware deve ter o próprio limite de bomba ligada |
 | `id` | texto | Id do agendamento no Firestore |
 
   - O firmware **deve ignorar um `id` repetido**: o QoS 1 pode entregar a mesma mensagem mais de uma vez.
@@ -421,7 +421,7 @@ Para testar com o celular, o backend também aceita mp3, m4a, aac, ogg e flac. O
 **Depuração (`?debug=true`):** a resposta passa a trazer `X-Ouviu` (o que o modelo entendeu), `X-Texto` (a frase falada) e `X-Modelo`, com %-encoding. Fica desligado por padrão porque cabeçalhos compridos estouram o buffer do cliente HTTP do ESP32 e a fala da pessoa é dado pessoal.
 
 **Para o firmware do S3:**
-- Use um **timeout de pelo menos 30 s** no cliente HTTP: o caso típico medido é de cerca de 9 s (3 s para entender e responder, 5 a 6 s para gerar a voz), e o pior caso, com o modelo reserva, é bem maior.
+- Use um **timeout de pelo menos 30 s** no cliente HTTP: o caso típico medido é de cerca de 9 s (3 s para entender e responder, 5 a 6 s para gerar a voz), e o pior caso (os dois modelos esgotando o prazo de áudio de 25 s, mais a voz) passa de 60 s, então o cliente do S3 deve esperar bastante antes de desistir.
 - A resposta tem cerca de 350 a 380 KB para 8 s de fala. Confirmar a memória do S3 (PSRAM) ou tocar em streaming; se faltar memória, o servidor pode gerar a voz em 16 kHz.
 - Pedidos de rega por voz não mudam nada para o S3: a frase de confirmação ou recusa já vem falada no WAV.
 
@@ -448,8 +448,8 @@ O backend valida todo pedido de rega antes de agendar. Os valores abaixo são co
 | Regra | Valor atual | Variável |
 |---|---|---|
 | Atraso máximo | 24 h | `REGA_ATRASO_MAX_S` |
-| Duração máxima | 10 s | `REGA_DURACAO_MAX_S` |
-| Duração padrão (a pessoa não disse) | 5 s | `REGA_DURACAO_PADRAO_S` |
+| Duração máxima | 10 s no código (a demonstração usa 15 s, definida no `.env`) | `REGA_DURACAO_MAX_S` |
+| Duração padrão (a pessoa não disse) | 5 s no código (a demonstração usa 15 s, definida no `.env`) | `REGA_DURACAO_PADRAO_S` |
 | Intervalo mínimo entre regas | 10 min (conta regas pendentes, executando e concluídas) | `REGA_INTERVALO_MIN_S` |
 | Tolerância de atraso (reinício do backend) | 5 min | `REGA_TOLERANCIA_S` |
 | Vaso offline ou sem nenhuma leitura | Recusa | — |
@@ -465,9 +465,18 @@ Outras garantias:
 - **Frases verdadeiras:** a confirmação e a recusa são escritas pelo backend, com o horário e a duração realmente agendados. Numa rega "de agora", o backend espera o resultado e, se falhar, a planta diz que não conseguiu.
 - O firmware tem seu próprio tempo máximo de bomba ligada (defesa em profundidade).
 
+**Travas independentes do LLM (ADR-025):**
+- Rega: a fala da pessoa precisa conter uma forma de pedido (rega, regar, regue, molhar, irrigar...). "Regular", "regulamento" e "regada" não valem.
+- Cancelamento: a fala precisa conter uma palavra de cancelamento (cancelar, desmarcar, desfazer, esquecer, "não precisa", "deixa pra lá"...). Sem ela, o modelo não desfaz nenhuma rega e a planta pede para repetir.
+- No áudio, sem transcrição não há pedido.
+
+**Publicação incerta:** se o comando é publicado mas o prazo de 5 s estoura, a rega fica `falhou` com o motivo "não tenho certeza se o comando chegou ao vaso", e esse caso **conta no intervalo mínimo**, para um novo pedido não regar em dobro. Falha com certeza de nada ter sido enviado (sem conexão com o broker) não conta. Se o comando saiu e só a gravação final falha, a rega nunca vira `falhou` (fica `executando`, que também conta no intervalo).
+
 ## 8.6 Assistente com personalidade
 
 O prompt do sistema faz a planta falar em primeira pessoa, de forma curta, só sobre a planta, usando apenas os números recebidos. Se um dado faltar, ela diz que não sabe. O "estado" da planta (ex.: com sede, ok) é calculado pelo backend a partir de limiares configuráveis, e o Gemini apenas dá a voz. O tom (mais informativo ou mais "planta") é configurável. Essa mesma personalidade também aparece visualmente na carinha do display do S3, que dá lugar aos dados dos sensores enquanto a resposta é dada (ADR-021, ADR-023).
+
+**Como os números são falados (ADR-027):** a temperatura e as umidades são arredondadas ao inteiro mais próximo ("uns 24 graus"), porque a resposta é ouvida. O **pH nunca é arredondado**: a planta diz o valor exatamente como está nos dados, com a casa decimal e sem "uns", "perto de" ou "cerca de" (6,5 é "seis vírgula cinco"). Se o pH estiver indisponível, ela diz que não sabe. A regra está no prompt (`ai/prompt.py`) e é coberta por testes do texto do prompt; o que o Gemini de fato fala só se confirma em teste real (teste manual com o Gemini real).
 
 ## 8.7 Frescor dos dados (vaso offline ou leitura velha)
 
@@ -483,7 +492,9 @@ O assistente não pode falar como se o último valor ainda fosse o de agora (REQ
 
 - Há um modelo principal e um reserva (`GEMINI_MODEL` e `GEMINI_MODEL_FALLBACK`; na voz, `TTS_MODEL` e `TTS_MODEL_FALLBACK`).
 - Erro 5xx: tenta de novo uma vez no mesmo modelo. Timeout: vai direto ao reserva. Erro 4xx ou resposta vazia: vai ao reserva. Se todos falham, a rota responde 502.
-- Prazos por chamada: 8 s para texto, 12 s para entender o áudio, 15 s para a voz.
+- Prazos por chamada: 8 s para texto, 25 s para entender o áudio, 15 s para a voz.
+- Modelo principal padrão `gemini-3.5-flash-lite` e reserva `gemini-3.1-flash-lite`; o 3.1 como principal estourava o prazo com frequência.
+- **Firestore lento ou fora do ar** (prazo de 5 s, `FIRESTORE_TIMEOUT_S`): as rotas seguem como "sem dados" (a planta diz que não sabe como está e a rega é recusada), em vez de responder erro 500. O S3 ainda recebe uma resposta falada, e o erro fica no log. Há testes das duas rotas com falha real (erro e lentidão da leitura do Firestore), confirmando 200 e "sem dados".
 - Em testes reais, o modelo principal estourou o prazo ou deu 503 com frequência e o reserva respondeu; trocar a ordem no `.env` é a mitigação imediata.
 - A integração fica atrás de `responder` e `responder_audio` (ADR-018): trocar de provedor mexe só no interior dessas funções.
 
@@ -497,11 +508,19 @@ O assistente não pode falar como se o último valor ainda fosse o de agora (REQ
 - **Contexto da conversa (REQ-FUNC-008, ADR-015):** lista `ctx:{deviceId}` no Redis com as últimas 3 trocas (`CONTEXTO_TURNOS`), cada pergunta e resposta cortada em 300 caracteres (`CONTEXTO_MAX_CHARS`) e prazo de 5 min renovado a cada troca (`CONTEXTO_TTL_S`). Só texto, nunca áudio. Entra no prompt só para entender referências ("e a umidade?"): os números vêm sempre dos dados atuais, e o prompt manda ignorar instruções vindas da conversa. Guarda-se a frase que foi **falada** (na rega, a confirmação do backend), não a proposta do modelo. Sem Redis ou com Redis fora do ar, segue sem contexto. `CONTEXTO_TURNOS=0` desliga.
 - Um pedido de rega que dependa só do contexto ("e daqui a 1 hora?") não vale: a trava da rega exige uma palavra de rega na frase atual (ADR-025), e a planta pede para a pessoa repetir.
 
+## 8.10 Estratégia de testes
+
+- **Automatizados (pytest, 448 execuções):** rodam sem Gemini, Firestore, Redis ou MQTT reais, com fakes; cada teste usa os padrões de `config.py`, independentes do `.env`. Rodam só dentro do Docker: `docker compose run --rm --no-deps backend python -m pytest tests/ -q`.
+- **Prova por reversão:** ao corrigir uma trava de segurança, a mudança é desfeita temporariamente para confirmar que algum teste falha, e só depois restaurada. Assim o teste prova a trava, e não apenas passa.
+- **Manuais (roteiro interno do grupo):** cobrem o que os fakes não provam: Gemini real e voz, Firestore e Redis reais, Mosquitto, e depois o firmware real. Os scripts `tests/manual_*.py` gastam cota do Gemini e ficam fora do pytest.
+- **Plano formal:** o documento `IEEE829_GreenSync_Plano_de_Testes.md` organiza níveis, critérios de aprovação, suspensão, ambiente e responsabilidades, apontando para os requisitos do SRS em vez de repeti-los.
+- **Limite conhecido:** os testes automatizados garantem o texto do prompt e as travas do backend, não a fala do modelo; a integração com o vaso real, o TLS na rede da faculdade e o app só se provam em teste conjunto.
+
 ---
 
 # 9. Architecture Decisions
 
-Ver documento separado **ADR — Decisões — GreenSync**, que registra as decisões arquiteturais (ADR-001 a ADR-026). Decisões recentes, desta versão do documento:
+Ver documento separado **ADR — Decisões — GreenSync**, que registra as decisões arquiteturais (ADR-001 a ADR-028). Decisões recentes, desta versão do documento:
 
 | ADR | Tema |
 |---|---|
@@ -518,6 +537,8 @@ Ver documento separado **ADR — Decisões — GreenSync**, que registra as deci
 | ADR-024 | pH simulado na demonstração, combinado com o professor |
 | ADR-025 | Pedido de rega como saída estruturada, validado e confirmado pelo backend (ajusta o item 2 da ADR-021) |
 | ADR-026 | Dados desatualizados e tolerância a falhas do assistente |
+| ADR-027 | pH sempre falado com o valor exato |
+| ADR-028 | Estratégia de testes: fakes, prova por reversão e testes manuais |
 
 ---
 
@@ -566,6 +587,10 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | pH simulado | O pH da demonstração não é medido (ADR-024) | Dizer isso na apresentação; trocar pela sonda real mexe só no firmware |
 | Precedência entre irrigação automática e rega agendada | Ainda não definida (SRS, REQ-FUNC-002) | Definir com o firmware; o backend já recusa a rega de agora com a bomba ligada ou o solo encharcado |
 | Redis e a expectativa do professor | O uso definido (contexto, limite) pode não ser o esperado | Confirmar com o professor (fila, cache ou ambos) |
+| Chave de API única | Quem tem a chave consulta e rega qualquer `deviceId`; a chave fica embutida no firmware do S3 | Aceito para o projeto; uma chave por vaso mudaria o contrato. Trocar a chave se vazar |
+| Recarga das regas na subida sem nova tentativa | Se o Firestore estiver fora quando o backend sobe, as regas pendentes só voltam no próximo reinício e podem expirar (tolerância de 5 min) | Raro; repetir a recarga em segundo plano é melhoria futura |
+| Regas com gravação incerta | Se o Firestore cair logo depois de o comando sair, a rega pode ficar `executando` até o próximo reinício | Continua contando no intervalo mínimo; no reinício vira `falhou` e nunca repete |
+| Testes com fakes não provam o mundo real | A suíte (448 execuções) usa fakes; o Gemini, o Firestore, a bomba e a rede da faculdade só se provam em teste real | Testes manuais do grupo e Plano de Testes; testar com o firmware em grupo antes da demonstração |
 | Prazo | Prazos da V1 e da V2 ainda não definidos com a IA na V1 | Confirmar com o professor |
 
 ---

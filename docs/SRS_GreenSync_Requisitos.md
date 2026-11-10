@@ -1,10 +1,10 @@
 # Software Requirements Specification
 ## Para GreenSync
 
-Version 0.5
+Version 0.7
 Prepared by [GreenSync]
 [Faculdade Nova Roma]
-03 de novembro de 2026
+09 de novembro de 2026
 
 ## Table of Contents
 <!-- TOC -->
@@ -41,6 +41,8 @@ Prepared by [GreenSync]
 | Grupo GreenSync | 21/09/2026 | Incorporação das decisões de arquitetura: dois microcontroladores (WROOM e S3), assistente de voz na V1, EMQX Cloud, Redis sem Celery, hospedagem paga no Render, sensores DHT22 e YL-69, assistente com personalidade e rega por voz com agenda, provisionamento de Wi-Fi (ADR-014 a ADR-022); novos requisitos REQ-FUNC-011 a REQ-FUNC-015 | 0.3 |
 | Grupo GreenSync | 01/10/2026 | Definição de que o display OLED fica no ESP32-S3 (junto com a voz) e alterna entre a carinha da planta e os dados dos sensores ao ser feita uma pergunta — resolve a pendência deixada em aberto pela ADR-016 (ADR-023); novo requisito REQ-FUNC-016 | 0.4 |
 | Grupo GreenSync | 03/11/2026 | Backend implementado: contrato HTTP de áudio definido (`X-Tela`, `X-Dados`, códigos de erro), limites da rega e do limite de perguntas definidos, TTS pelo Gemini, pedido de rega por saída estruturada (ADR-024 a ADR-026), tabela de verificação atualizada com os testes | 0.5 |
+| Grupo GreenSync | 09/11/2026 | Revisão do backend: trava de palavra também no cancelamento, publicação incerta do comando, Firestore lento tratado como "sem dados", padrões do Gemini e duração da rega de 15 s na demonstração (ADR-025 e ADR-026, Arc42 8.5 e 8.8) | 0.6 |
+| Grupo GreenSync | 09/11/2026 | pH falado sempre com o valor exato (ADR-027); testes das rotas contra falha real do Firestore; estratégia de testes (ADR-028) e novo Plano de Testes em formato IEEE 829; suíte com 448 testes | 0.7 |
 
 ## 1. Introduction
 
@@ -95,6 +97,7 @@ Na V1, o sistema inclui também um assistente de voz (LLM em nuvem, Google Gemin
 | Lista de Componentes de Hardware — GreenSync | Normativo | Documento do grupo (Word) |
 | ADR — Decisões — GreenSync | Normativo | `docs/ADR_GreenSync_Decisões.md` |
 | Arc42 — SDD — GreenSync | Normativo | `docs/Arc42_GreenSync_SDD.md` |
+| Plano de Testes — GreenSync (IEEE 829) | Normativo | `docs/IEEE829_GreenSync_Plano_de_Testes.md` |
 | Documentação EMQX Cloud | Informativo | site oficial do provedor |
 | Documentação Render | Informativo | site oficial do provedor |
 | Documentação Google Gemini API | Informativo | site oficial do provedor |
@@ -270,7 +273,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Title: Assistente de voz com personalidade da planta (V1)
 - Statement: O sistema shall permitir que o usuário faça perguntas faladas sobre o estado da planta e receba uma resposta falada, em primeira pessoa, como se fosse a própria planta, gerada a partir dos dados reais dos sensores.
 - Rationale: Diferencial do produto; objetivo central da entrega.
-- Acceptance Criteria: Pergunta como "como está minha planta?" resulta em resposta coerente com os dados atuais de pH/umidade/temperatura; se um dado faltar, a resposta diz que não sabe, sem inventar valores.
+- Acceptance Criteria: Pergunta como "como está minha planta?" resulta em resposta coerente com os dados atuais de pH/umidade/temperatura; se um dado faltar, a resposta diz que não sabe, sem inventar valores. O pH é dito com o valor exato, com a casa decimal (6,5 não vira "uns 7"); temperatura e umidades podem ser arredondadas ao inteiro.
 - Verification Method: Demonstration
 - More Information: Entrada de áudio direta no Gemini (sem STT separado) validada em testes; TTS pelo Gemini (ADR-018). O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis; o LLM apenas dá a voz. O contexto curto da conversa (últimas 3 trocas, 5 min de validade) fica no Redis e só ajuda a entender referências; os números vêm sempre dos dados atuais. Se o dado estiver velho ou o vaso offline, a planta avisa em vez de falar como se fosse de agora (Arc42, 8.7). Pedidos de rega seguem o REQ-FUNC-011. A troca de tela do display segue o REQ-FUNC-016.
 
@@ -295,7 +298,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Dar ao usuário controle direto sobre a rega, sem abrir mão da segurança da atuação.
 - Acceptance Criteria: Um pedido válido resulta em bomba ligada na hora marcada, pelo tempo pedido. Um pedido fora dos limites (atraso ou duração máximos, intervalo mínimo entre regas, dispositivo offline) é recusado, e a resposta falada informa a recusa. A bomba nunca permanece ligada além do tempo máximo do firmware.
 - Verification Method: Test
-- More Information: O LLM apenas devolve um pedido estruturado (saída JSON, ADR-025); nunca aciona a bomba. Comando entregue ao WROOM pelo tópico `greensync/{deviceId}/comandos` (Arc42, 8.1). Limites: atraso máximo de 24 h, duração máxima de 10 s, duração padrão de 5 s, intervalo mínimo de 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%; valores configuráveis, a calibrar com testes reais (Arc42, 8.5).
+- More Information: O LLM apenas devolve um pedido estruturado (saída JSON, ADR-025); nunca aciona a bomba. Comando entregue ao WROOM pelo tópico `greensync/{deviceId}/comandos` (Arc42, 8.1). Limites: atraso máximo de 24 h, duração máxima de 10 s, duração padrão de 5 s, intervalo mínimo de 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%; valores configuráveis, a calibrar com testes reais (Arc42, 8.5); a demonstração usa 15 s de duração (`.env`). Pedido de rega e cancelamento só valem se a fala da pessoa contiver uma palavra do pedido (ADR-025).
 
 - ID: REQ-FUNC-012
 - Title: Agendamento persistente de regas
@@ -493,10 +496,13 @@ As respostas são totalmente automatizadas, sem revisão humana antes de cada re
 | REQ-FUNC-015 | Test | `tests/test_limite.py`, `tests/test_rota_perguntar.py`, `tests/test_rota_audio.py` | Verificado no backend | Execução real com Redis: 200, 200, 200, 429, 429 (limite reduzido para o teste); testes automatizados, novembro/2026 |
 | REQ-FUNC-016 | Demonstration | `tests/test_tela.py`, `tests/test_rota_audio.py` | Em andamento (backend decide e devolve `X-Tela` e `X-Dados`; falta o display do S3) | Testes automatizados, novembro/2026 |
 
-Suíte automatizada do backend: 311 testes (pytest), todos passando em novembro/2026. Para rodar: `docker compose run --rm backend python -m pytest tests/ -v`. Os scripts `tests/manual_gemini.py`, `tests/manual_audio.py` e `tests/manual_rega.py` gastam cota do Gemini e por isso não rodam no pytest.
+Suíte automatizada do backend: 448 testes (pytest), todos passando em novembro/2026. Para rodar: `docker compose run --rm --no-deps backend python -m pytest tests/ -v`. Os scripts `tests/manual_gemini.py`, `tests/manual_audio.py` e `tests/manual_rega.py` gastam cota do Gemini e por isso não rodam no pytest.
+
+Plano de testes completo (níveis, critérios de aprovação e suspensão, ambiente, responsabilidades): ver o Plano de Testes (IEEE 829).
 
 ## 5. Appendixes
 
 - Lista de Componentes de Hardware — GreenSync (documento Word separado, com tabela completa de componentes por grupo e fase V1/V2).
 - ADR — Decisões — GreenSync (registro das decisões arquiteturais tomadas, ver arquivo próprio).
 - Arc42 — SDD — GreenSync (documento de arquitetura de software, ver arquivo próprio).
+- Plano de Testes — GreenSync (formato IEEE 829, ver arquivo próprio).

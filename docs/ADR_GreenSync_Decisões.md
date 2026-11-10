@@ -2,7 +2,7 @@
 
 Cada decisão segue o template de Michael Nygard (Title / Status / Context / Decision / Consequences).
 
-> **Atualizado em 03/11/2026** com as ADR-024 a ADR-026 (backend implementado). Atualizações anteriores: 01/10/2026 (ADR-023) e 21/09/2026 (ADR-014 a ADR-022). Decisões antigas que foram revisadas ou substituídas continuam registradas, com o status indicando qual ADR as revisou. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático.
+> **Atualizado em 09/11/2026** (ADR-027 e ADR-028; antes, no mesmo dia, revisão do backend: ADR-025 e ADR-026). Antes, **em 03/11/2026** com as ADR-024 a ADR-026 (backend implementado). Atualizações anteriores: 01/10/2026 (ADR-023) e 21/09/2026 (ADR-014 a ADR-022). Decisões antigas que foram revisadas ou substituídas continuam registradas, com o status indicando qual ADR as revisou. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático.
 
 ---
 
@@ -430,6 +430,13 @@ A ADR-021 decidiu que o Gemini apenas devolve o pedido de rega e o backend valid
 ## Consequences
 Fica mais fácil garantir a segurança (várias camadas independentes do modelo, uma única chamada ao LLM, frases sempre verdadeiras) e testar tudo com dados simulados. Fica mais difícil porque o prompt carrega regras de extração de horário que precisam ser validadas com o Gemini real (`tests/manual_rega.py`), a confirmação perde um pouco da personalidade da planta por ser uma frase fixa, o firmware precisa assinar o tópico de comandos e tratar `id` repetido, e a precedência entre a irrigação automática por umidade e a rega agendada continua em aberto **[A DEFINIR]**. "Concluída" no backend quer dizer "comando publicado": só o firmware sabe se a bomba girou.
 
+### Atualização (09/11/2026) — revisão do backend
+1. **Trava também no cancelamento.** Cancelar uma rega marcada exige uma palavra de cancelamento na fala da pessoa (cancelar, desmarcar, desfazer, esquecer, "não precisa", "deixa pra lá"), como a rega exige uma palavra de rega. Antes, o modelo errando podia desmarcar uma rega. A trava da rega ficou mais justa: "regular", "regulamento" e "regada" não valem.
+2. **Publicação incerta.** Se o `publish` do comando estoura o prazo, a mensagem pode ter chegado. A rega fica `falhou` com o motivo "não tenho certeza se o comando chegou ao vaso" e **conta no intervalo mínimo**, para uma nova tentativa não regar em dobro. Sem conexão com o broker (nada enviado) continua não contando.
+3. **Gravação final.** Se o comando saiu e só a gravação de `concluida` falha, a rega nunca vira `falhou`: tenta de novo e, sem sucesso, fica `executando` (que também conta).
+4. **Duração.** O padrão do código continua 10 s (máximo) e 5 s (padrão), no lado seguro. A demonstração usa 15 s, definidos no `.env` (`REGA_DURACAO_MAX_S` e `REGA_DURACAO_PADRAO_S`), a calibrar com a bomba real. O firmware aplica o próprio limite de bomba ligada.
+5. **Defesa em profundidade:** a duração gravada no Firestore (que o app também pode escrever) é conferida de novo na hora de regar; valor inválido ou acima do limite nunca vira comando.
+
 ---
 
 # ADR-026 — Dados desatualizados e tolerância a falhas do assistente
@@ -448,3 +455,44 @@ Se o vaso para de enviar leituras ou cai da rede, o último valor gravado no Fir
 
 ## Consequences
 Fica mais fácil manter o assistente honesto e no ar mesmo com o vaso offline, o Gemini lento ou o Redis fora; o app e o display podem avisar que o dado é velho. Fica mais difícil porque o limite de 120 s precisa combinar com o intervalo de publicação do firmware (10 a 30 s), o modelo reserva pode ter qualidade ou latência diferentes, sem Redis o limite deixa de proteger a cota do Gemini (aceito, e há aviso no log de inicialização), e o pior caso de latência soma tentativas (o cliente do S3 deve usar timeout de pelo menos 30 s).
+
+### Atualização (09/11/2026) — revisão do backend
+- **Firestore lento ou fora:** a leitura dos dados do vaso tem prazo de 5 s (`FIRESTORE_TIMEOUT_S`). Se falhar, as rotas seguem como "sem dados": a planta diz que não sabe e a rega é recusada, sem erro 500. O agendador continua usando a leitura que levanta erro, para saber que deu problema.
+- **Modelos e prazos padrão:** principal `gemini-3.5-flash-lite`, reserva `gemini-3.1-flash-lite`, prazo de áudio de 25 s (o 3.1 como principal estourava o prazo com frequência).
+- **Entrada MQTT:** o `deviceId` do tópico segue a mesma regra das rotas HTTP (letras, números, "-" e "_"); timestamp do ESP antes de 2020 ou muito no futuro é trocado pela hora do servidor; erro inesperado no assinante MQTT não o derruba (reconecta em 5 s).
+- **Limitações aceitas:** uma chave de API única para todos os vasos; a recarga das regas na subida não tenta de novo se o Firestore estiver fora.
+
+---
+
+# ADR-027 — pH sempre falado com o valor exato
+
+## Status
+Aceita
+
+## Context
+O prompt do assistente mandava arredondar todos os números ao inteiro mais próximo, porque a resposta é ouvida. Em teste real, pH 6,5 e 6,7 foram ditos como "uns 7". Para temperatura e umidade o arredondamento é aceitável numa fala, mas o pH é um dado de planta em que 0,2 faz diferença (faixa adequada de 5,5 a 7,5, ADR-024), e dois valores diferentes viraram a mesma fala.
+
+## Decision
+Separar a regra em duas no prompt (`ai/prompt.py`): temperatura e umidades continuam arredondadas ao inteiro mais próximo; o **pH nunca se arredonda**: a planta diz o valor do bloco de dados com a casa decimal, sem "uns", "perto de" nem "cerca de" (6,5 é "seis vírgula cinco"), e diz que não sabe se o pH estiver indisponível. O bloco de dados já entregava o pH sem arredondar; só a instrução mudou.
+
+## Consequences
+Fica mais fácil confiar na fala quando o assunto é pH, e o texto do prompt é coberto por testes. Fica mais difícil porque a regra é uma instrução a um modelo de linguagem: os testes provam o texto do prompt, não a fala, então a conferência real (publicar 6,5 e 6,7 e perguntar) fica no roteiro de testes manuais, e um reforço com exemplos pode ser necessário. Se um dia a umidade também precisar ser exata, a regra pode ser estendida (cuidado para a fala "uns 30%" não contradizer o aviso de sede quando o solo está em 29,5%).
+
+---
+
+# ADR-028 — Estratégia de testes: fakes, prova por reversão e testes manuais
+
+## Status
+Aceita
+
+## Context
+O grupo tem três frentes e só uma (o backend) tinha código testável sem hardware. A suíte do backend precisa rodar sem gastar cota do Gemini, sem o Firestore real e sem internet, e as travas de segurança da rega (palavra do pedido, intervalo mínimo, publicação incerta) não podem depender da sorte do modelo. Também foi pedido, na disciplina, um plano de testes formal.
+
+## Decision
+1. **Testes automatizados com fakes** (pytest), rodando só dentro do Docker, independentes do `.env`, para cada trava do backend.
+2. **Prova por reversão** para as travas de segurança: desfaz-se a correção, confirma-se que um teste falha e restaura-se.
+3. **Testes manuais** (roteiro interno do grupo, fora da documentação) para o que os fakes não provam: Gemini real, voz, Firestore e Redis reais, Mosquitto e, depois, o firmware.
+4. **Plano de Testes em formato IEEE 829, enxuto** (`IEEE829_GreenSync_Plano_de_Testes.md`), que referencia o SRS em vez de repeti-los.
+
+## Consequences
+Fica mais fácil mudar o backend com segurança (448 execuções em poucos segundos) e provar cada trava. Fica mais difícil porque uma suíte verde não prova a integração real: o roteiro manual e os testes em grupo com o vaso continuam obrigatórios, e o plano precisa ser mantido junto com o SRS para não ficar desatualizado.
