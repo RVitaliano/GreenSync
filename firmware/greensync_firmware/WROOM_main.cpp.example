@@ -8,9 +8,28 @@
 // ---------- Hardware ----------
 #define DHT_PIN 4
 #define DHT_TYPE DHT22
-#define PINO_BOMBA_SIMULADA 2   // LED da própria placa faz o papel da bomba (relé ainda não existe)
+#define PINO_BOMBA_SIMULADA 2   // LED da placa: agora so ESPELHA o estado da bomba (debug)
 
-// ---------- Limites de segurança da bomba (valem para qualquer comando) ----------
+// >>> NOVO: rele da bomba + sensor YL-69 <<<
+// PINOS PLACEHOLDER (mock): troque quando a fiacao for definida.
+#define PINO_RELE_BOMBA 26      // MOCK: IN1 (ou IN2) do modulo rele
+#define PINO_YL69 34            // MOCK: A0 do modulo do YL-69. Use GPIO 32-39 (ADC1, funciona com Wi-Fi)
+
+#define RELE_ATIVO_LOW 1        // 1 = rele liga com nivel LOW (comum nos modulos azuis); 0 = liga com HIGH
+
+// 1 = le o YL-69 de verdade; 0 = continua usando SOLO_SIMULADO do config.h (util sem o sensor ligado)
+#define USAR_YL69_REAL 1
+
+// Calibracao do YL-69 (ADC 12 bits, 0-4095). Seco no ar = SECO; dentro da agua = MOLHADO.
+#define SOLO_SECO_RAW 3300
+#define SOLO_MOLHADO_RAW 1300
+
+// Irrigacao automatica com histerese (% de umidade do solo)
+#define UMIDADE_SOLO_LIGA_PCT 30      // liga quando <= 30%
+#define UMIDADE_SOLO_DESLIGA_PCT 60   // desliga antes do tempo maximo quando >= 60%
+#define INTERVALO_LEITURA_SOLO_MS 2000
+
+// ---------- Limites de seguranca da bomba (valem para qualquer comando) ----------
 #define TEMPO_MAX_BOMBA_MS 10000
 #define INTERVALO_MIN_REGAS_MS 30000
 
@@ -18,7 +37,7 @@ DHT dht(DHT_PIN, DHT_TYPE);
 WiFiClientSecure espClient;       // TLS (porta 8883)
 PubSubClient client(espClient);
 
-// Tópicos do contrato: greensync/{deviceId}/...
+// Topicos do contrato: greensync/{deviceId}/...
 String topicSensores  = String("greensync/") + DEVICE_ID + "/sensores";
 String topicStatus    = String("greensync/") + DEVICE_ID + "/status";
 String topicComandos  = String("greensync/") + DEVICE_ID + "/comandos";
@@ -26,13 +45,43 @@ String clientId       = String("greensync-") + DEVICE_ID;
 
 // ---------- Estado da bomba ----------
 bool bombaLigada = false;
+bool bombaAuto = false;           // NOVO: true se a rega atual foi iniciada pela regra de umidade
 unsigned long bombaFimMs = 0;
 unsigned long ultimaRegaMs = 0;
 bool jaRegou = false;
 
+// ---------- NOVO: estado do solo ----------
+int umidadeSoloAtual = -1;        // % (0-100); -1 = leitura invalida
+unsigned long ultimaLeituraSoloMs = 0;
+
+// NOVO: aciona o rele respeitando a logica (ativo em LOW ou HIGH)
+void escreverRele(bool ligar) {
+  digitalWrite(PINO_RELE_BOMBA, (ligar == (bool)RELE_ATIVO_LOW) ? LOW : HIGH);
+}
+
+// NOVO: umidade do solo em %. Retorna -1 se a leitura parecer invalida (sensor desconectado).
+int lerUmidadeSolo() {
+#if USAR_YL69_REAL
+  long soma = 0;
+  const int amostras = 16;
+  for (int i = 0; i < amostras; i++) {
+    soma += analogRead(PINO_YL69);
+    delay(2);
+  }
+  int raw = (int)(soma / amostras);
+  if (raw >= 4090 || raw <= 5) return -1;
+  int pct = map(raw, SOLO_SECO_RAW, SOLO_MOLHADO_RAW, 0, 100);
+  return constrain(pct, 0, 100);
+#else
+  return SOLO_SIMULADO;
+#endif
+}
+
 void ligarBomba(unsigned long duracaoMs) {
-  digitalWrite(PINO_BOMBA_SIMULADA, HIGH);
+  escreverRele(true);                      // NOVO: rele real
+  digitalWrite(PINO_BOMBA_SIMULADA, HIGH); // LED espelha
   bombaLigada = true;
+  bombaAuto = false;                       // a regra automatica marca true logo depois, se for o caso
   bombaFimMs = millis() + duracaoMs;
   ultimaRegaMs = millis();
   jaRegou = true;
@@ -40,9 +89,32 @@ void ligarBomba(unsigned long duracaoMs) {
 }
 
 void desligarBomba() {
+  escreverRele(false);                     // NOVO: rele real
   digitalWrite(PINO_BOMBA_SIMULADA, LOW);
   bombaLigada = false;
+  bombaAuto = false;
   Serial.println("Bomba DESLIGADA");
+}
+
+// NOVO: regra base de irrigacao (histerese). Usa os MESMOS limites de seguranca dos comandos.
+void irrigacaoAutomatica() {
+  if (umidadeSoloAtual < 0) {              // sem leitura valida: nunca age
+    if (bombaLigada && bombaAuto) desligarBomba();
+    return;
+  }
+  if (bombaLigada) {
+    if (bombaAuto && umidadeSoloAtual >= UMIDADE_SOLO_DESLIGA_PCT) {
+      Serial.println("Solo umido o bastante: encerrando rega automatica");
+      desligarBomba();
+    }
+    return;
+  }
+  bool intervaloOk = !jaRegou || (millis() - ultimaRegaMs >= INTERVALO_MIN_REGAS_MS);
+  if (umidadeSoloAtual <= UMIDADE_SOLO_LIGA_PCT && intervaloOk) {
+    Serial.printf("Solo seco (%d%%): rega automatica\n", umidadeSoloAtual);
+    ligarBomba(TEMPO_MAX_BOMBA_MS);
+    bombaAuto = true;
+  }
 }
 
 // ---------- Comandos vindos do backend ----------
@@ -78,7 +150,7 @@ void onMensagem(char* topic, byte* payload, unsigned int length) {
   ligarBomba(duracaoMs);
 }
 
-// ---------- Conexão MQTT (sem delay: tenta de novo a cada 5 s) ----------
+// ---------- Conexao MQTT (sem delay: tenta de novo a cada 5 s) ----------
 unsigned long ultimaTentativaMqtt = 0;
 
 void conectarMqtt() {
@@ -101,8 +173,21 @@ void conectarMqtt() {
 
 void setup() {
   Serial.begin(115200);
+
+  // NOVO: rele nasce DESLIGADO (nivel inativo ja antes de virar saida, sem pulso no boot)
+  escreverRele(false);
+  pinMode(PINO_RELE_BOMBA, OUTPUT);
+  escreverRele(false);
+
   pinMode(PINO_BOMBA_SIMULADA, OUTPUT);
   digitalWrite(PINO_BOMBA_SIMULADA, LOW);
+
+#if USAR_YL69_REAL
+  analogReadResolution(12);
+  analogSetPinAttenuation(PINO_YL69, ADC_11db);   // faixa ~0-3,3 V
+  pinMode(PINO_YL69, INPUT);
+#endif
+
   dht.begin();
 
   WiFi.mode(WIFI_STA);
@@ -125,6 +210,9 @@ void setup() {
   client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(onMensagem);
   client.setBufferSize(512);
+
+  umidadeSoloAtual = lerUmidadeSolo();   // NOVO: primeira leitura
+  ultimaLeituraSoloMs = millis();
 }
 
 void loop() {
@@ -134,6 +222,14 @@ void loop() {
   // Desliga a bomba quando o tempo acaba (nunca passa de TEMPO_MAX_BOMBA_MS)
   if (bombaLigada && (long)(millis() - bombaFimMs) >= 0) {
     desligarBomba();
+  }
+
+  // NOVO: le o solo periodicamente e aplica a irrigacao automatica
+  // (fica ANTES do bloco de publicacao, que tem "return" quando o DHT22 falha)
+  if (millis() - ultimaLeituraSoloMs >= INTERVALO_LEITURA_SOLO_MS) {
+    ultimaLeituraSoloMs = millis();
+    umidadeSoloAtual = lerUmidadeSolo();
+    irrigacaoAutomatica();
   }
 
   // Publica uma leitura a cada INTERVALO_PUBLICACAO_MS
@@ -153,9 +249,14 @@ void loop() {
       Serial.println("MQTT desconectado: leitura NAO publicada");
       return;
     }
+    // NOVO: sem leitura valida do YL-69, nao publica um valor falso
+    if (umidadeSoloAtual < 0) {
+      Serial.println("YL-69 invalido/desconectado: leitura NAO publicada");
+      return;
+    }
 
     float ph = PH_SIMULADO;          // SIMULADO: sensor de pH ainda nao existe
-    int umidadeSolo = SOLO_SIMULADO; // SIMULADO: YL-69 ainda nao existe
+    int umidadeSolo = umidadeSoloAtual;  // AGORA vem do YL-69 (ou de SOLO_SIMULADO se USAR_YL69_REAL = 0)
 
     char payload[200];
     snprintf(payload, sizeof(payload),
