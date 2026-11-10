@@ -10,9 +10,11 @@ services:
       - .env
     volumes:
       - ./app:/app/app
+      - ./tests:/app/tests
       - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
     depends_on:
       - mosquitto
+      - redis
     restart: unless-stopped
 
   mosquitto:
@@ -21,4 +23,9 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  # Só a rede interna do compose enxerga o Redis (sem "ports").
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped

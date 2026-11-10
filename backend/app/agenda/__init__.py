@@ -1,0 +1,1 @@
+"""Rega por voz e agendamento persistente (REQ-FUNC-011 e REQ-FUNC-012)."""

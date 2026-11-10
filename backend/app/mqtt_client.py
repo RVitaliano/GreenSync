@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import re
 import ssl
 
 import aiomqtt
@@ -8,8 +10,42 @@ from pydantic import ValidationError
 from app.config import settings
 from app.firebase_client import save_reading, save_status
 from app.models import DeviceStatus, SensorReading
+from app.seguranca import DEVICE_ID_PADRAO
 
 logger = logging.getLogger("greensync.mqtt")
+
+# Conexão ativa com o broker (a mesma que escuta os sensores). Fica None enquanto
+# estiver desconectado; publicar_comando usa isto para enviar comandos ao vaso.
+_cliente: aiomqtt.Client | None = None
+
+
+class MqttIndisponivel(Exception):
+    """Não foi possível publicar no broker.
+
+    incerta=True quando a publicação chegou a ser tentada e falhou no meio (a mensagem
+    PODE ter sido entregue); False quando com certeza nada foi enviado.
+    """
+
+    def __init__(self, mensagem: str, incerta: bool = False):
+        super().__init__(mensagem)
+        self.incerta = incerta
+
+
+async def publicar_comando(device_id: str, payload: dict) -> None:
+    """Publica um comando em greensync/{device_id}/comandos (QoS 1, sem retain).
+
+    Sem retain de propósito: um comando de rega guardado no broker seria entregue
+    de novo a quem se reconectasse depois, e a bomba ligaria sem ninguém pedir.
+    """
+    cliente = _cliente
+    if cliente is None:
+        raise MqttIndisponivel("sem conexão com o broker MQTT")
+    topico = settings.mqtt_topic_comandos.format(device_id=device_id)
+    try:
+        await cliente.publish(topico, json.dumps(payload), qos=1, retain=False, timeout=5)
+    except aiomqtt.MqttError as exc:
+        raise MqttIndisponivel(str(exc), incerta=True) from exc
+    logger.info("[%s] comando publicado em %s: %s", device_id, topico, payload)
 
 
 def parse_topic(topic: str) -> tuple[str, str] | None:
@@ -28,6 +64,11 @@ async def handle_message(message: aiomqtt.Message) -> None:
         logger.warning("Tópico fora do padrão, ignorado: %s", topic)
         return
     device_id, kind = parsed
+    # Mesma regra das rotas HTTP: o id vira nome de documento no Firestore (vazio, "." e ".."
+    # não são nomes válidos) e um id que a API recusa não teria como ser consultado.
+    if not re.fullmatch(DEVICE_ID_PADRAO, device_id):
+        logger.warning("device_id inválido no tópico, ignorado: %r", topic)
+        return
 
     try:
         if kind == "sensores":
@@ -49,6 +90,7 @@ async def handle_message(message: aiomqtt.Message) -> None:
 
 async def run_mqtt_subscriber() -> None:
     """Conecta no broker e reconecta automaticamente se cair."""
+    global _cliente
     while True:
         try:
             async with aiomqtt.Client(
@@ -64,6 +106,7 @@ async def run_mqtt_subscriber() -> None:
                 )
                 await client.subscribe(settings.mqtt_topic_sensores, qos=1)
                 await client.subscribe(settings.mqtt_topic_status, qos=1)
+                _cliente = client
 
                 async for message in client.messages:
                     try:
@@ -74,3 +117,10 @@ async def run_mqtt_subscriber() -> None:
         except aiomqtt.MqttError as exc:
             logger.warning("Sem conexão com o broker (%s). Tentando de novo em 5s...", exc)
             await asyncio.sleep(5)
+        except Exception:
+            # Qualquer outro erro não pode matar a tarefa em silêncio: sem ela o backend
+            # para de receber sensores e de publicar comandos, mas segue "no ar".
+            logger.exception("Erro inesperado no assinante MQTT. Tentando de novo em 5s...")
+            await asyncio.sleep(5)
+        finally:
+            _cliente = None

@@ -1,0 +1,15 @@
+# Segredos: nunca entram na imagem
+.env
+*.env
+!.env.example
+serviceAccountKey.json
+firebase-adminsdk*.json
+
+# Lixo de execução (a pasta tests NÃO é excluída: o compose a monta como volume)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+tests/saida/
+tests/amostras/

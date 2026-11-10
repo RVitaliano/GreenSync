@@ -1,10 +1,10 @@
 # Software Requirements Specification
 ## Para GreenSync
 
-Version 0.3
+Version 0.5
 Prepared by [GreenSync]
 [Faculdade Nova Roma]
-21 de setembro de 2026
+03 de novembro de 2026
 
 ## Table of Contents
 <!-- TOC -->
@@ -39,6 +39,8 @@ Prepared by [GreenSync]
 | Grupo GreenSync | 31/08/2026 | Primeira versão, consolidando decisões tomadas até a reunião com o professor orientador | 0.1 |
 | Grupo GreenSync | 06/09/2026 | Unificação da terminologia do time (sem referência a integrantes individuais); definição do provedor de LLM (Google Gemini, camada gratuita); ajuste da estratégia de desenvolvimento do módulo de IA para ocorrer em paralelo com a V1 | 0.2 |
 | Grupo GreenSync | 21/09/2026 | Incorporação das decisões de arquitetura: dois microcontroladores (WROOM e S3), assistente de voz na V1, EMQX Cloud, Redis sem Celery, hospedagem paga no Render, sensores DHT22 e YL-69, assistente com personalidade e rega por voz com agenda, provisionamento de Wi-Fi (ADR-014 a ADR-022); novos requisitos REQ-FUNC-011 a REQ-FUNC-015 | 0.3 |
+| Grupo GreenSync | 01/10/2026 | Definição de que o display OLED fica no ESP32-S3 (junto com a voz) e alterna entre a carinha da planta e os dados dos sensores ao ser feita uma pergunta — resolve a pendência deixada em aberto pela ADR-016 (ADR-023); novo requisito REQ-FUNC-016 | 0.4 |
+| Grupo GreenSync | 03/11/2026 | Backend implementado: contrato HTTP de áudio definido (`X-Tela`, `X-Dados`, códigos de erro), limites da rega e do limite de perguntas definidos, TTS pelo Gemini, pedido de rega por saída estruturada (ADR-024 a ADR-026), tabela de verificação atualizada com os testes | 0.5 |
 
 ## 1. Introduction
 
@@ -50,11 +52,11 @@ Este SRS define **o que** o sistema GreenSync deve fazer, para orientar o desenv
 
 ### 1.2 Product Scope
 
-O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla irrigação automática por bomba d'água, e sincroniza esses dados em tempo real com um aplicativo mobile via nuvem (MQTT → backend → Firebase). O sistema usa dois microcontroladores: um ESP32-WROOM (sensores e bomba, comunicação via MQTT) e um ESP32-S3 (voz, comunicação via HTTP com o backend).
+O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla irrigação automática por bomba d'água, e sincroniza esses dados em tempo real com um aplicativo mobile via nuvem (MQTT → backend → Firebase). O sistema usa dois microcontroladores: um ESP32-WROOM (sensores e bomba, comunicação via MQTT) e um ESP32-S3 (voz e display, comunicação via HTTP com o backend).
 
 Na V1, o sistema inclui também um assistente de voz (LLM em nuvem, Google Gemini) que responde como a própria planta, com base nos dados reais dos sensores, e pode agendar regas por comando de voz, com validação no backend. Na V2, o sistema substitui a conectividade Wi-Fi do ESP32-WROOM por um módulo GPRS, tornando o dispositivo independente de rede local.
 
-**Incluído no escopo:** aquisição e envio de dados de sensores, irrigação automática, sincronização em nuvem, aplicativo de acompanhamento, assistente de voz com personalidade da planta (V1), rega por comando de voz com agendamento validado (V1), configuração de Wi-Fi por portal, sem regravar o firmware (V1), conectividade celular (V2).
+**Incluído no escopo:** aquisição e envio de dados de sensores, irrigação automática, sincronização em nuvem, aplicativo de acompanhamento, assistente de voz com personalidade da planta (V1), display com carinha da planta que alterna para os dados dos sensores ao ser perguntado (V1), rega por comando de voz com agendamento validado (V1), configuração de Wi-Fi por portal, sem regravar o firmware (V1), conectividade celular (V2).
 
 **Fora do escopo:** controle de iluminação artificial (removido do projeto), armazenamento local/offline de dados, dashboard web (o app é o único meio de acompanhamento), controle por voz de qualquer atuador além da rega pela bomba, configuração de Wi-Fi pelo aplicativo via Bluetooth (melhoria futura), suporte a múltiplos vasos/usuários simultâneos.
 
@@ -106,7 +108,7 @@ A Seção 2 dá uma visão geral do produto (contexto, funções, restrições, 
 
 ### 2.1 Product Perspective
 
-O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, inspirado em conversas com o professor orientador (cujo projeto pessoal usa arquitetura de IA local — decisão consciente do grupo foi seguir por um caminho de LLM em nuvem, ver ADR-004). Não há sistema legado a substituir. O sistema depende de serviços de terceiros: EMQX Cloud (broker MQTT), Firebase (Firestore), Render (hospedagem do backend e do Redis) e Google Gemini (LLM, com entrada de áudio a validar), além de um provedor de TTS ainda a definir. Não há SLA formal contratado. Os serviços são de camada gratuita, com exceção do serviço web pago do Render (ADR-019).
+O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, inspirado em conversas com o professor orientador (cujo projeto pessoal usa arquitetura de IA local — decisão consciente do grupo foi seguir por um caminho de LLM em nuvem, ver ADR-004). Não há sistema legado a substituir. O sistema depende de serviços de terceiros: EMQX Cloud (broker MQTT), Firebase (Firestore), Render (hospedagem do backend e do Redis) e Google Gemini (LLM, com entrada de áudio a validar), além do TTS do próprio Gemini. Não há SLA formal contratado. Os serviços são de camada gratuita, com exceção do serviço web pago do Render (ADR-019).
 
 ### 2.2 Product Functions
 
@@ -115,7 +117,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Publicar as leituras dos sensores via MQTT para a nuvem
 - Persistir os dados recebidos no Firebase (leitura atual + histórico)
 - Exibir os dados em tempo real e o histórico no aplicativo mobile
-- Indicar visualmente o estado da planta em um display OLED no próprio vaso
+- Indicar visualmente o estado da planta em um display OLED no ESP32-S3, alternando entre uma carinha (personalidade da planta) e os dados dos sensores quando o usuário pergunta algo por voz
 - Responder perguntas faladas sobre o estado da planta, como se fosse a própria planta, usando um assistente de voz (V1)
 - Agendar e executar regas pedidas por voz, com validação no backend e limites no firmware (V1)
 - Permitir mudo físico do microfone por botão dedicado
@@ -125,7 +127,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 ### 2.3 Product Constraints
 
 - O sistema **deve** usar MQTT como protocolo de comunicação entre o dispositivo de sensores e a nuvem (requisito da disciplina, definido pelo professor orientador), com broker EMQX Cloud (ADR-014)
-- O sistema **deve** usar dois microcontroladores: ESP32-WROOM (sensores e bomba) e ESP32-S3 (voz) (ADR-016)
+- O sistema **deve** usar dois microcontroladores: ESP32-WROOM (sensores e bomba) e ESP32-S3 (voz e display) (ADR-016, ADR-023)
 - O backend **deve** ser implementado em Python com FastAPI, em processo único, sem Celery (ADR-015)
 - O sistema **deve** incluir o Redis, por exigência do professor; seus usos estão definidos na ADR-015
 - O aplicativo **deve** ser implementado em Flutter
@@ -150,7 +152,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 | O Render pago (Starter, 512 MB) comporta API, assinante MQTT e chamadas de IA em um único processo | Seria preciso migrar para serviços separados — ver ADR-019 |
 | Existe conectividade Wi-Fi com internet no local da demonstração, e a rede libera a porta 8883 (MQTT/TLS) | O WROOM conectaria ao Wi-Fi, mas o MQTT falharia; alternativa: MQTT sobre WebSocket seguro na 443 ou hotspot do celular |
 | A operadora escolhida para o chip SIM (V2) oferece cobertura no local de uso | Módulo GPRS não conseguiria conectar |
-| O Google Gemini aceita áudio de entrada com qualidade adequada em português, e o provedor de TTS (a definir) tem voz adequada | Seria preciso um STT separado, ou trocar de provedor (ADR-018) |
+| O Google Gemini aceita áudio de entrada com qualidade adequada em português, e o TTS do Gemini tem voz adequada (validado em testes de bancada; falta testar voz de celular e ruído de fundo) | Seria preciso um STT separado, ou trocar de provedor (ADR-018) |
 | As cotas do plano gratuito do Gemini (inclusive para áudio) atendem ao uso do projeto (ainda não conferidas) | O assistente poderia ser limitado ou exigir plano pago |
 | A sonda de pH adquirida é confiável o suficiente para leituras consistentes | Maior risco técnico identificado pelo grupo — ver Seção 11 do Arc42 |
 | O sensor de solo YL-69 (resistivo) suporta o período de uso do projeto e pode ser calibrado | Leituras derivariam com a corrosão; alternativa: sensor capacitivo |
@@ -161,10 +163,10 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 | Área de requisito | Fase | Responsável |
 |---|---|---|
 | Leitura de sensores, irrigação automática, publicação MQTT, execução de comandos de rega (ESP32-WROOM) | V1 | Hardware/firmware |
-| Captura e reprodução de áudio, botões de falar e mute, envio HTTP (ESP32-S3) | V1 | Hardware/firmware |
+| Captura e reprodução de áudio, display (rosto/dados), botões de falar e mute, envio HTTP (ESP32-S3) | V1 | Hardware/firmware |
 | Configuração de Wi-Fi por portal (os dois ESPs) | V1 | Hardware/firmware |
 | Backend (assinatura MQTT, validação, escrita no Firestore) | V1 | Backend |
-| Módulo de IA (Gemini, personalidade, function calling), endpoints de áudio e texto, Redis | V1 | Backend |
+| Módulo de IA (Gemini, personalidade, pedido de rega por saída estruturada, estado da tela), endpoints de áudio e texto, Redis | V1 | Backend |
 | Agendamento e validação de regas, comandos MQTT | V1 | Backend + Hardware/firmware |
 | App — exibição de dados em tempo real, histórico e, se possível, agendamentos | V1 | App/design |
 | Conectividade GPRS (ESP32-WROOM) | V2 | Hardware/firmware |
@@ -179,7 +181,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - O app deve exibir, em tela principal: pH atual, umidade do solo atual, temperatura do ar atual, umidade do ar atual, estado da bomba (ligada/desligada), estado de conexão do dispositivo (online/offline).
 - O app deve exibir um gráfico de histórico de pelo menos uma das grandezas monitoradas (ex.: umidade do solo ao longo do tempo).
 - O app pode exibir as regas agendadas e permitir cancelá-las, lendo os agendamentos do Firestore (desejável, **[A DEFINIR]** com a frente do aplicativo).
-- O vaso possui um display OLED local mostrando um "rosto" com expressões simples que refletem o estado da planta — não é interativo, só informativo.
+- O vaso possui um display OLED no ESP32-S3 mostrando, por padrão, um "rosto" com expressões simples que refletem a personalidade e o estado da planta. Ao ser feita uma pergunta por voz, o display troca temporariamente para mostrar os dados do sensor relevantes (ex.: temperatura, umidade, pH), voltando à carinha ao final da resposta — não é interativo, só informativo (ver REQ-FUNC-016).
 - O usuário interage por voz com a planta por meio do microfone e do alto-falante do ESP32-S3, com botão físico de mute.
 - Os ESPs oferecem uma página de configuração de Wi-Fi (portal), acessível pelo celular quando não há rede salva.
 - **[A DEFINIR]** padrão visual/acessibilidade do app (não definido formalmente pelo grupo até o momento).
@@ -192,8 +194,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
   - Sensor de pH: interface analógica (ADC1 do ESP32, ou ADC externo opcional ADS1115 via I2C).
   - Sensor de temperatura e umidade do ar (DHT22): interface digital de 1 fio (protocolo próprio do DHT).
   - Bomba d'água: acionada por MOSFET de nível lógico ou módulo relé (**[A DEFINIR]** pela frente de firmware), controlado por GPIO, com diodo de roda-livre na bomba.
-  - Display OLED (SSD1306): interface I2C; **[A DEFINIR]** em qual dos dois ESPs.
-- **ESP32-S3:** microfone INMP441 (I2S), alto-falante via amplificador (I2S), botão físico de mute e botão de falar (**[A DEFINIR]**).
+- **ESP32-S3:** microfone INMP441 (I2S), alto-falante via amplificador (I2S), display OLED (SSD1306, interface I2C) mostrando a carinha da planta ou os dados dos sensores (ADR-023), botão físico de mute e botão de falar (**[A DEFINIR]**).
 - Botão físico em cada ESP para apagar a rede Wi-Fi salva e reabrir o portal de configuração.
 - Alimentação: fonte externa única de 5V, dimensionada com folga para os dois ESPs e a bomba (sugestão: 5V/3A); regulador de tensão reduz para 3,3V onde necessário; capacitor de desacoplamento para evitar reinícios quando a bomba liga.
 
@@ -204,12 +205,12 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 | Broker MQTT (EMQX Cloud) | ESP32-WROOM → Broker | MQTT sobre TLS (porta 8883) | Leituras de sensores e status em JSON |
 | Broker MQTT (EMQX Cloud) | Broker → Backend | MQTT sobre TLS (porta 8883) | Leituras e status (assinatura de tópico) |
 | Broker MQTT (EMQX Cloud) | Backend → Broker → ESP32-WROOM | MQTT sobre TLS (porta 8883) | Comandos de rega em JSON (tópico `comandos`, **proposta**) |
-| Backend | ESP32-S3 ↔ Backend | HTTPS, cabeçalho `X-API-Key` | Áudio da pergunta → áudio da resposta (formato **[A DEFINIR]**) |
+| Backend | ESP32-S3 ↔ Backend | HTTPS, cabeçalho `X-API-Key` | Áudio da pergunta → áudio da resposta + estado da tela (cabeçalhos `X-Tela` e `X-Dados`, Arc42 8.4) |
 | Firebase (Firestore) | Backend → Firestore | SDK Admin (gRPC/HTTPS) | Leitura atual, histórico, status e agendamentos |
 | Firebase (Firestore) | Firestore → App | FlutterFire (SDK cliente) | Listeners em tempo real |
 | Redis | Backend → Redis | Protocolo Redis (`REDIS_URL`) | Contexto de conversa e contadores de limite |
-| API de LLM (nuvem) | Backend → Google Gemini | HTTPS/REST | Áudio ou texto da pergunta + contexto dos sensores → texto da resposta ou pedido de ação (function calling) |
-| API de TTS (nuvem) | Backend → Provedor **[A DEFINIR]** | HTTPS/REST | Texto → áudio |
+| API de LLM (nuvem) | Backend → Google Gemini | HTTPS/REST | Áudio ou texto da pergunta + contexto dos sensores → texto da resposta e pedido de ação (saída estruturada, ADR-025) |
+| API de TTS (nuvem) | Backend → Google Gemini (TTS) | HTTPS/REST | Texto → áudio |
 
 ### 3.2 Functional
 
@@ -271,7 +272,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Diferencial do produto; objetivo central da entrega.
 - Acceptance Criteria: Pergunta como "como está minha planta?" resulta em resposta coerente com os dados atuais de pH/umidade/temperatura; se um dado faltar, a resposta diz que não sabe, sem inventar valores.
 - Verification Method: Demonstration
-- More Information: Entrada de áudio direta no Gemini (sem STT separado) é proposta a validar; TTS **[A DEFINIR]**. O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis; o LLM apenas dá a voz. O contexto curto da conversa fica no Redis. Pedidos de rega seguem o REQ-FUNC-011.
+- More Information: Entrada de áudio direta no Gemini (sem STT separado) validada em testes; TTS pelo Gemini (ADR-018). O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis; o LLM apenas dá a voz. O contexto curto da conversa (últimas 3 trocas, 5 min de validade) fica no Redis e só ajuda a entender referências; os números vêm sempre dos dados atuais. Se o dado estiver velho ou o vaso offline, a planta avisa em vez de falar como se fosse de agora (Arc42, 8.7). Pedidos de rega seguem o REQ-FUNC-011. A troca de tela do display segue o REQ-FUNC-016.
 
 - ID: REQ-FUNC-009
 - Title: Mute físico do microfone
@@ -294,7 +295,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Dar ao usuário controle direto sobre a rega, sem abrir mão da segurança da atuação.
 - Acceptance Criteria: Um pedido válido resulta em bomba ligada na hora marcada, pelo tempo pedido. Um pedido fora dos limites (atraso ou duração máximos, intervalo mínimo entre regas, dispositivo offline) é recusado, e a resposta falada informa a recusa. A bomba nunca permanece ligada além do tempo máximo do firmware.
 - Verification Method: Test
-- More Information: O LLM apenas devolve um pedido estruturado (function calling); nunca aciona a bomba. Comando entregue ao WROOM pelo tópico `greensync/{deviceId}/comandos` (**proposta**). Limites iniciais sugeridos: atraso máximo de 24 h, duração máxima de 10 s; a calibrar. Duração padrão quando o usuário não disser **[A DEFINIR]**.
+- More Information: O LLM apenas devolve um pedido estruturado (saída JSON, ADR-025); nunca aciona a bomba. Comando entregue ao WROOM pelo tópico `greensync/{deviceId}/comandos` (Arc42, 8.1). Limites: atraso máximo de 24 h, duração máxima de 10 s, duração padrão de 5 s, intervalo mínimo de 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%; valores configuráveis, a calibrar com testes reais (Arc42, 8.5).
 
 - ID: REQ-FUNC-012
 - Title: Agendamento persistente de regas
@@ -302,7 +303,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: O serviço pode reiniciar antes da hora da rega; perder uma rega é aceitável, duplicá-la não.
 - Acceptance Criteria: Ao reiniciar o backend com um agendamento pendente ainda dentro da tolerância, a rega é executada uma vez; fora da tolerância, o agendamento vira `expirada` e não há rega. O status `executando` é gravado antes de publicar o comando.
 - Verification Method: Test
-- More Information: Tolerância sugerida: 5 minutos **[A DEFINIR]**. Cancelamento por voz ou pelo app altera o status para `cancelada`.
+- More Information: Tolerância de 5 minutos (`REGA_TOLERANCIA_S`). Um agendamento encontrado como `executando` no reinício vira `falhou` e nunca é repetido. Cancelamento por voz ou pelo app altera o status para `cancelada`.
 
 - ID: REQ-FUNC-013
 - Title: Configuração de Wi-Fi sem regravar o firmware
@@ -318,7 +319,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Impedir que terceiros consumam a cota do LLM; manter o áudio fora do MQTT (ADR-017).
 - Acceptance Criteria: Requisição sem chave ou com chave inválida é recusada; com chave válida, retorna a resposta em áudio.
 - Verification Method: Test
-- More Information: Formato do áudio de entrada e de saída, duração máxima e forma de devolução da resposta **[A DEFINIR]** (Arc42, Seção 8.4).
+- More Information: Contrato definido no Arc42, Seção 8.4: entrada em WAV 16 kHz, 16 bits, mono (até 15 s e 1 MB), com `X-API-Key` e `X-Device-Id`; resposta em WAV (24 kHz por padrão) na mesma requisição, com `X-Tela` e `X-Dados`.
 
 - ID: REQ-FUNC-015
 - Title: Limite de perguntas por chave de API
@@ -326,7 +327,15 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 - Rationale: Proteger a cota gratuita do LLM e evitar uso abusivo.
 - Acceptance Criteria: Excedido o limite, novas perguntas são recusadas até a janela liberar.
 - Verification Method: Test
-- More Information: Valor do limite e da janela **[A DEFINIR]**.
+- More Information: 10 perguntas por janela de 60 s por chave de API (configurável); `/perguntar` e `/audio` compartilham o limite; excedido, a resposta é 429 com `Retry-After`; se o Redis cair, a pergunta passa (Arc42, 8.9).
+
+- ID: REQ-FUNC-016
+- Title: Display com alternância entre carinha e dados dos sensores
+- Statement: O ESP32-S3 shall exibir, por padrão, uma carinha representando a personalidade da planta em seu display OLED, e trocar temporariamente para exibir os dados do sensor (pH, umidade do solo, temperatura e umidade do ar) quando o usuário fizer uma pergunta por voz, retornando à carinha ao final da resposta.
+- Rationale: Reforçar a personalidade do assistente de voz e dar suporte visual à resposta falada, sem exigir que o usuário leia os dados só pelo app.
+- Acceptance Criteria: Em repouso, o display mostra a carinha. Ao final de uma pergunta reconhecida, o display troca para os dados relevantes à pergunta (ou a leitura atual completa) e retorna à carinha após a resposta falada terminar (ou após um tempo configurável).
+- Verification Method: Demonstration
+- More Information: Quem decide o que exibir é o backend (módulo `ai/`), devolvido junto com o áudio da resposta no `POST /audio` (ver ADR-023 e Arc42, Seção 8.4). O firmware do S3 só executa a troca, sem decidir sozinho quando trocar. Formato definido: cabeçalho `X-Tela` (`rosto` ou `dados`) e cabeçalho `X-Dados` (JSON com `ph`, `solo`, `temp`, `ar` e `atuais`).
 
 ### 3.3 Quality of Service
 
@@ -368,7 +377,7 @@ O GreenSync é um produto novo, desenvolvido do zero como projeto acadêmico, in
 
 ### 3.4 Compliance
 
-Não há requisitos regulatórios ou contratuais formais aplicáveis a este projeto acadêmico. Os únicos "contratos" relevantes são os termos de uso dos serviços de terceiros usados (EMQX Cloud, Render, Firebase, Google Gemini e o provedor de TTS a definir), que devem ser respeitados quanto a limites de uso.
+Não há requisitos regulatórios ou contratuais formais aplicáveis a este projeto acadêmico. Os únicos "contratos" relevantes são os termos de uso dos serviços de terceiros usados (EMQX Cloud, Render, Firebase, Google Gemini, inclusive o TTS), que devem ser respeitados quanto a limites de uso.
 
 ### 3.5 Design and Implementation
 
@@ -376,7 +385,7 @@ Não há requisitos regulatórios ou contratuais formais aplicáveis a este proj
 
 - Firmware: gravado nos dois ESPs (WROOM e S3) via Arduino IDE (ou PlatformIO), USB. A rede Wi-Fi é configurada pelo portal de configuração de cada ESP (ADR-022), sem regravar o firmware.
 - Backend: empacotado em imagem Docker (`Dockerfile`); implantado no Render (serviço web pago) a partir do repositório do grupo (deploy automático a partir da branch principal). Localmente, qualquer integrante sobe o backend com `docker compose up`, sem precisar configurar Python/dependências manualmente.
-- Ambiente local (`docker-compose.yml`): serviço `backend` (com hot-reload, montando o código local e a chave de serviço do Firebase como volume somente leitura), serviço `mosquitto` (broker MQTT local, para desenvolver sem depender do EMQX Cloud) e, quando o Redis entrar, serviço `redis`. O endereço do broker é configurável por variável de ambiente, alternando entre local e EMQX Cloud.
+- Ambiente local (`docker-compose.yml`): serviço `backend` (com hot-reload, montando o código local e a chave de serviço do Firebase como volume somente leitura), serviço `mosquitto` (broker MQTT local, para desenvolver sem depender do EMQX Cloud) e serviço `redis` (Redis 7, usado no limite de perguntas). O endereço do broker é configurável por variável de ambiente, alternando entre local e EMQX Cloud.
 - App: instalado nos aparelhos de teste via build de desenvolvimento Flutter; distribuição final **[A DEFINIR]** (provavelmente APK/build local para a demonstração, sem publicação em loja).
 
 #### 3.5.2 Build and Delivery
@@ -418,6 +427,7 @@ O backend é desenhado para múltiplos dispositivos no futuro (estrutura `device
 #### 3.5.9 Proof of Concept
 
 - Antes da integração completa, o grupo validará isoladamente: (a) a sonda de pH, por ser o componente de maior risco; (b) a calibração do YL-69 e a leitura do DHT22; (c) o fluxo MQTT → broker → backend, com dados simulados; (d) a leitura/escrita no Firestore a partir do backend; (e) o tratamento do Last Will; (f) o Gemini com um áudio gravado no celular e leituras de sensor simuladas; (g) a porta 8883 na rede da faculdade; (h) a latência da voz.
+- Validados no backend em novembro/2026, com dados simulados e o Gemini real: o assistente em texto e em áudio (WAV de pergunta e de resposta geradas), o limite de perguntas com Redis, o tratamento de dado velho e vaso offline e a criação de agendamento no Firestore. Pendentes: voz de celular com ruído, execução da rega no horário com o vaso real e o teste de ponta a ponta com o firmware.
 - Já validados em ambiente local em 21/09/2026: (c) com o Mosquitto e um publicador de teste (validação de payload e descarte de mensagens inválidas) e (d) gravação da leitura atual e do histórico no Firestore.
 
 #### 3.5.10 Change Management
@@ -431,9 +441,9 @@ Esta seção se aplica ao assistente de voz (V1). Dado o porte acadêmico do pro
 #### 3.6.1 Model Specification
 
 - O modelo é a API do **Google Gemini**, escolhida por oferecer camada gratuita (critério: custo zero) com qualidade adequada em português — ver ADR-004. O Groq fica como plano B (ver ADR-018).
-- Escopo do modelo: falar como a própria planta, em primeira pessoa, sobre o estado da planta a partir dos dados reais dos sensores (contexto injetado no prompt), e pedir ações de rega por function calling — não é um chatbot de propósito geral.
-- A entrada de áudio direta no Gemini (sem STT separado) é uma proposta a validar; o provedor de TTS ainda é **[A DEFINIR]**.
-- Toda a integração fica atrás de uma função única (`responder(audio, leitura)`), para trocar de provedor sem afetar o resto do backend.
+- Escopo do modelo: falar como a própria planta, em primeira pessoa, sobre o estado da planta a partir dos dados reais dos sensores (contexto injetado no prompt), pedir ações de rega por saída estruturada (ADR-025), e indicar o que o display deve mostrar — não é um chatbot de propósito geral.
+- A entrada de áudio direta no Gemini (sem STT separado) foi validada em testes; o TTS também é do Gemini.
+- Toda a integração fica atrás de duas funções (`responder` para texto e `responder_audio` para voz), para trocar de provedor sem afetar o resto do backend.
 - Não há dataset de validação próprio nem versionamento de modelo pelo grupo — a qualidade é a fornecida pelo provedor escolhido.
 - O módulo é construído em camadas: texto (`POST /perguntar`), depois áudio gravado no celular, depois o ESP32-S3 real (ver ADR-018).
 
@@ -446,7 +456,7 @@ Esta seção se aplica ao assistente de voz (V1). Dado o porte acadêmico do pro
 #### 3.6.3 Guardrails
 
 - O prompt enviado ao LLM deve restringir o escopo de resposta a perguntas sobre a planta/dados dos sensores, usando apenas os números recebidos; quando um dado faltar, o assistente deve dizer que não sabe, sem inventar valores.
-- O LLM nunca aciona atuadores: ele apenas devolve um pedido estruturado (function calling), e o backend valida atraso e duração máximos, intervalo mínimo entre regas e disponibilidade do dispositivo antes de agendar. A resposta falada reflete o resultado da validação, e o firmware ainda aplica seu próprio tempo máximo de bomba.
+- O LLM nunca aciona atuadores: ele apenas devolve um pedido estruturado (ADR-025), e o backend só aceita o pedido se a fala da pessoa contiver uma palavra de rega (silêncio ou ruído nunca viram rega) e valida atraso e duração máximos, intervalo mínimo entre regas e disponibilidade do dispositivo antes de agendar. A resposta falada reflete o resultado da validação, e o firmware ainda aplica seu próprio tempo máximo de bomba.
 - O limite de perguntas por chave de API (REQ-FUNC-015) protege a cota do LLM.
 - Não há mecanismo de moderação de conteúdo adicional além do que o provedor de LLM já oferece nativamente — considerado suficiente para o escopo do projeto.
 
@@ -472,15 +482,18 @@ As respostas são totalmente automatizadas, sem revisão humana antes de cada re
 | REQ-FUNC-004 | Test | [A DEFINIR] | Em andamento (validação e gravação funcionando em ambiente local) | Log do backend e documentos no Firestore, 21/09/2026 |
 | REQ-FUNC-005 | Demonstration | [A DEFINIR] | Não iniciado | |
 | REQ-FUNC-006 | Demonstration | [A DEFINIR] | Não iniciado | |
-| REQ-FUNC-007 | Test | [A DEFINIR] | Em andamento (tratamento do status implementado; teste do Last Will pendente) | |
-| REQ-FUNC-008 | Demonstration | [A DEFINIR] | Não iniciado | |
+| REQ-FUNC-007 | Test | `tests/test_frescor.py`, `tests/test_estado.py` | Em andamento (backend: status online/offline e frescor dos dados verificados; falta o teste do Last Will com o firmware e a indicação no app) | Testes automatizados; cenários reais (offline, dado velho, recuperação) com Mosquitto e Firestore, novembro/2026 |
+| REQ-FUNC-008 | Demonstration | `tests/test_responder.py`, `tests/test_prompt.py`, `tests/test_contexto.py`, `tests/manual_gemini.py`, `tests/manual_audio.py` | Em andamento (assistente em texto e em áudio funcionando no backend com o Gemini real; falta o S3 e o teste com voz de celular e ruído) | Respostas reais do Gemini e WAVs de resposta gerados nos testes manuais; contexto verificado por testes automatizados e contra um Redis real (5 trocas guardadas, 3 lembradas, prazo de 300 s), novembro/2026 |
 | REQ-FUNC-009 | Inspection | [A DEFINIR] | Não iniciado | |
 | REQ-FUNC-010 | Test | [A DEFINIR] | Não iniciado (V2) | |
-| REQ-FUNC-011 | Test | [A DEFINIR] | Não iniciado | |
-| REQ-FUNC-012 | Test | [A DEFINIR] | Não iniciado | |
+| REQ-FUNC-011 | Test | `tests/test_regras.py`, `tests/test_servico.py`, `tests/test_agendador.py`, `tests/test_mqtt_comando.py`, `tests/manual_rega.py` | Em andamento (validação, agendamento e publicação do comando verificados por testes automatizados; falta rodar `manual_rega.py` com o Gemini real e executar com o vaso físico) | Testes automatizados; documento de agendamento criado no Firestore real, novembro/2026 |
+| REQ-FUNC-012 | Test | `tests/test_agendador.py`, `tests/test_servico.py` | Em andamento (persistência, reivindicação antes de publicar, recarga e expiração no reinício verificadas por testes automatizados; falta confirmar a execução no horário com o Firestore real) | Testes automatizados (inclui reinício sem rega duplicada); documento `pendente` no Firestore real, novembro/2026 |
 | REQ-FUNC-013 | Demonstration | [A DEFINIR] | Não iniciado | |
-| REQ-FUNC-014 | Test | [A DEFINIR] | Não iniciado | |
-| REQ-FUNC-015 | Test | [A DEFINIR] | Não iniciado | |
+| REQ-FUNC-014 | Test | `tests/test_rota_audio.py`, `tests/test_audio.py`, `tests/test_voz.py` | Em andamento (endpoint verificado com chave, validação de áudio e voz; falta o cliente no S3) | Chamadas reais ao `POST /audio`: 401 sem chave, 422 com áudio inválido, 200 com WAV de resposta em cerca de 9 s, novembro/2026 |
+| REQ-FUNC-015 | Test | `tests/test_limite.py`, `tests/test_rota_perguntar.py`, `tests/test_rota_audio.py` | Verificado no backend | Execução real com Redis: 200, 200, 200, 429, 429 (limite reduzido para o teste); testes automatizados, novembro/2026 |
+| REQ-FUNC-016 | Demonstration | `tests/test_tela.py`, `tests/test_rota_audio.py` | Em andamento (backend decide e devolve `X-Tela` e `X-Dados`; falta o display do S3) | Testes automatizados, novembro/2026 |
+
+Suíte automatizada do backend: 311 testes (pytest), todos passando em novembro/2026. Para rodar: `docker compose run --rm backend python -m pytest tests/ -v`. Os scripts `tests/manual_gemini.py`, `tests/manual_audio.py` e `tests/manual_rega.py` gastam cota do Gemini e por isso não rodam no pytest.
 
 ## 5. Appendixes
 

@@ -2,7 +2,7 @@
 
 Cada decisão segue o template de Michael Nygard (Title / Status / Context / Decision / Consequences).
 
-> **Atualizado em 21/09/2026** com as ADR-014 a ADR-022. Decisões antigas que foram revisadas ou substituídas continuam registradas, com o status indicando qual ADR as revisou. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático.
+> **Atualizado em 03/11/2026** com as ADR-024 a ADR-026 (backend implementado). Atualizações anteriores: 01/10/2026 (ADR-023) e 21/09/2026 (ADR-014 a ADR-022). Decisões antigas que foram revisadas ou substituídas continuam registradas, com o status indicando qual ADR as revisou. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático.
 
 ---
 
@@ -247,6 +247,9 @@ A ADR-013 rejeitou Celery e Redis, mantendo o backend em um único processo ass�
 ## Consequences
 Fica mais fácil manter um único processo, gastar pouca memória, atender à exigência do professor e migrar depois para serviços separados, já que a URL do Redis é configurável. Fica mais difícil porque não há fila durável: uma tarefa em andamento se perde num reinício (aceitável, pois o usuário repete a pergunta, e as regas agendadas ficam no Firestore). Se o professor exigir uma fila de verdade, existem alternativas mais leves que o Celery (ex.: `arq` ou `RQ`). A expectativa exata do professor sobre o Redis (fila, cache ou ambos) ainda deve ser confirmada **[A DEFINIR]**.
 
+### Atualização (03/11/2026) — contexto da conversa implementado
+O contexto curto passou a existir: lista `ctx:{deviceId}` no Redis com as últimas **3 trocas**, cada pergunta e resposta cortada em **300 caracteres**, expirando em **5 minutos** sem conversa (`CONTEXTO_TURNOS`, `CONTEXTO_MAX_CHARS`, `CONTEXTO_TTL_S`; `CONTEXTO_TURNOS=0` desliga). Guarda só texto, nunca áudio, e o conteúdo não vai para o log. Se o Redis faltar ou cair, o assistente segue sem contexto (mesma política do limite de perguntas). No prompt, o bloco vem depois dos dados reais e manda usar sempre os dados atuais e ignorar instruções que apareçam na conversa. Guarda-se a frase realmente falada, inclusive a confirmação ou recusa da rega escrita pelo backend (ADR-025). Consequência aceita: um pedido de rega que dependa só do contexto ("e daqui a 1 hora?") não é executado, porque a trava da rega exige a palavra de rega na frase atual.
+
 ---
 
 # ADR-016 — Dois microcontroladores: ESP32-WROOM (sensores) e ESP32-S3 (voz)
@@ -260,12 +263,12 @@ A ADR-001 escolheu o ESP32-S3 como único microcontrolador, pensando no áudio d
 ## Decision
 Dividir as funções em dois dispositivos do mesmo vaso lógico (`deviceId`, ex.: `vaso-01`):
 - **ESP32-WROOM:** sensores (DHT22, YL-69, pH), bomba, publicação MQTT, Last Will e assinatura de comandos de rega.
-- **ESP32-S3:** voz — microfone (INMP441), alto-falante, mute físico e comunicação HTTP com o backend (ADR-017).
+- **ESP32-S3:** voz — microfone (INMP441), alto-falante, display OLED (rosto/dados, ver ADR-023), mute físico e comunicação HTTP com o backend (ADR-017).
 
 No Firestore, continua havendo um único documento por vaso.
 
 ## Consequences
-Fica mais fácil separar os riscos — a irrigação não depende do áudio — e aproveitar os exemplos de código do WROOM. Fica mais difícil manter dois firmwares, dois provisionamentos de Wi-Fi (ADR-022) e uma fonte de 5V que aguente os dois ESPs mais a bomba. Na V2, o GPRS deve ficar só no WROOM, porque o áudio do S3 é pesado para dados móveis. Em qual dos dois ESPs fica o display OLED ainda é uma decisão em aberto **[A DEFINIR]**.
+Fica mais fácil separar os riscos — a irrigação não depende do áudio — e aproveitar os exemplos de código do WROOM. Fica mais difícil manter dois firmwares, dois provisionamentos de Wi-Fi (ADR-022) e uma fonte de 5V que aguente os dois ESPs mais a bomba. Na V2, o GPRS deve ficar só no WROOM, porque o áudio do S3 é pesado para dados móveis. A dúvida sobre em qual dos dois ESPs ficaria o display foi resolvida pela ADR-023: fica no S3, junto com a voz.
 
 ---
 
@@ -278,10 +281,10 @@ Aceita
 Uma pergunta falada de 5 segundos, em 16 kHz e 16 bits, ocupa cerca de 160 KB, enquanto uma leitura de sensor ocupa cerca de 100 bytes. O MQTT é pensado para mensagens pequenas; enviar áudio por ele exigiria cortá-lo em pedaços, numerá-los e remontá-los no backend.
 
 ## Decision
-O S3 envia o áudio por **HTTP (POST) direto ao backend**, com o cabeçalho `X-API-Key` e a identificação do dispositivo. O MQTT fica exclusivo do WROOM (leituras, status e comandos). A resposta em áudio volta ao S3 na mesma requisição (**proposta**, a confirmar).
+O S3 envia o áudio por **HTTP (POST) direto ao backend**, com o cabeçalho `X-API-Key` e a identificação do dispositivo. O MQTT fica exclusivo do WROOM (leituras, status e comandos). A resposta em áudio volta ao S3 na mesma requisição (**proposta**, a confirmar); essa mesma resposta também carrega o estado da tela (rosto ou dados), ver ADR-023.
 
 ## Consequences
-Fica mais fácil implementar (casa com o FastAPI) e o S3 não precisa conhecer o broker. Fica mais difícil porque o endpoint fica exposto na internet e exige a chave e o limite de perguntas no Redis, o backend precisa estar sempre acordado quando alguém fala (ADR-019), e o formato do áudio (PCM ou WAV, taxa de amostragem) e a duração máxima ainda estão em aberto **[A DEFINIR]**.
+Fica mais fácil implementar (casa com o FastAPI) e o S3 não precisa conhecer o broker. Fica mais difícil porque o endpoint fica exposto na internet e exige a chave e o limite de perguntas no Redis, o backend precisa estar sempre acordado quando alguém fala (ADR-019), e o formato do áudio (PCM ou WAV, taxa de amostragem), a duração máxima e o formato do campo de estado da tela ainda estão em aberto **[A DEFINIR]**.
 
 ---
 
@@ -300,6 +303,9 @@ A construção segue em camadas: primeiro texto (`POST /perguntar`, testável se
 
 ## Consequences
 Fica mais fácil demonstrar o produto completo na V1 e reduzir o risco validando a IA em texto antes do hardware. Fica mais difícil porque a V1 fica bem maior (dois firmwares, áudio e IA), o prazo precisa ser reconfirmado com o professor **[A DEFINIR]**, a latência da voz precisa ser medida cedo, e as cotas do plano gratuito do Gemini (inclusive para áudio e voz) ainda não foram conferidas.
+
+### Atualização (03/11/2026)
+A entrada de áudio direta no Gemini (sem STT separado) foi validada em testes reais com gravações de teste, e o **TTS também é do Gemini** (Interactions API, modelo principal `gemini-3.8-flash-tts` e reserva `gemini-3.8-flash-lite-tts`), então o Groq e um STT separado não foram necessários. A integração ficou atrás de duas funções, `responder` (texto) e `responder_audio` (voz); a voz fica em `ai/voz.py`. A resiliência (modelo reserva, retry, prazos) está na ADR-026. Pendente: testar com voz de celular e ruído de fundo, e medir a latência com o S3 real. Caso típico medido no backend: cerca de 9 s (3 s para entender e responder, 5 a 6 s para a voz).
 
 ---
 
@@ -338,13 +344,13 @@ Fica mais fácil ter a umidade do ar como dado extra e usar um sensor digital si
 # ADR-021 — Assistente com personalidade e rega por voz, com agenda no Firestore
 
 ## Status
-Aceita — valores de limite ainda a calibrar
+Aceita — o item 2 foi ajustado pela ADR-025 (saída estruturada no lugar de function calling); os valores de limite foram definidos na ADR-025 e ainda precisam ser calibrados com testes reais
 
 ## Context
 O SRS previa um assistente apenas consultivo e excluía o controle de atuadores por voz. O grupo quer que o assistente simule a planta (fala em primeira pessoa, informa os dados dos sensores e diz quando precisa de água) e que seja possível pedir "regar daqui 1 minuto" por voz.
 
 ## Decision
-1. **Personalidade:** a planta fala em primeira pessoa, curta e usando apenas os números recebidos; se faltar dado, diz que não sabe. O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis, e o Gemini apenas dá a voz. O tom é configurável.
+1. **Personalidade:** a planta fala em primeira pessoa, curta e usando apenas os números recebidos; se faltar dado, diz que não sabe. O estado da planta (ex.: com sede) é calculado pelo backend a partir de limiares configuráveis, e o Gemini apenas dá a voz. O tom é configurável. Essa mesma personalidade também aparece visualmente na carinha do display do S3 (ADR-023).
 2. **Comandos:** a rega é pedida por *function calling*; o Gemini apenas devolve o pedido, e o **backend valida** antes de agir (atraso e duração máximos, intervalo mínimo entre regas, dispositivo online). O Gemini nunca aciona a bomba.
 3. **Agenda no Firestore:** cada rega vira um documento em `devices/{deviceId}/agendamentos`, com status (`pendente`, `executando`, `concluida`, `cancelada`, `expirada`, `falhou`); o backend mantém uma tarefa `asyncio` por agendamento e, ao reiniciar, recarrega os `pendente`. Agendamentos vencidos além de uma tolerância (sugestão: 5 minutos) viram `expirada`. O backend marca `executando` **antes** de publicar o comando, para nunca duplicar a rega.
 4. **Comando ao dispositivo:** publicação em `greensync/{deviceId}/comandos` (MQTT, QoS 1) **(proposta)**; o firmware aplica um tempo máximo de bomba ligada, independente do que receber.
@@ -368,3 +374,77 @@ Cada ESP abre, quando não consegue conectar, uma rede própria (ex.: `GreenSync
 
 ## Consequences
 Fica mais fácil trocar de rede sem regravar o firmware e sem trabalho no app. Fica mais difícil porque são dois firmwares com o mesmo comportamento, as credenciais ficam gravadas na flash (não usar a senha da rede pessoal em repositório público), e redes de faculdade podem bloquear a porta 8883 do MQTT, o que deve ser testado na rede real **[A DEFINIR]**.
+
+---
+
+# ADR-023 — Display no ESP32-S3, alternando entre rosto e dados dos sensores
+
+## Status
+Aceita
+
+## Context
+A ADR-016 dividiu sensores (WROOM) e voz (S3) em dois microcontroladores, mas deixou em aberto em qual dos dois ficaria o display OLED com o "rosto" da planta. O grupo já havia definido, desde antes da divisão em dois ESPs, que o display mostraria uma carinha simulando a personalidade da planta (ADR-021), e decidiu agora que essa carinha também deve dar lugar aos dados dos sensores quando o usuário pergunta algo por voz.
+
+## Decision
+O display OLED fica no **ESP32-S3**, junto com o microfone e o alto-falante — a troca de tela acontece no mesmo momento em que o assistente fala, então faz mais sentido estar no mesmo dispositivo que já processa a voz, em vez de depender de uma segunda via de comunicação (MQTT, que é do WROOM) só para sincronizar a expressão com a resposta falada.
+
+Comportamento: por padrão, o display mostra a carinha (personalidade da planta, ADR-021). Quando o usuário faz uma pergunta por voz, o display troca temporariamente para mostrar os dados do sensor relevantes à pergunta (ex.: temperatura, umidade, pH) e volta à carinha ao final da resposta. Quem decide o que mostrar é o **backend** (módulo `ai/`): a resposta do endpoint de áudio (`POST /audio`, ADR-017) passa a carregar, além do áudio, um campo de estado da tela (ex.: `"tela": "dados"` ou `"tela": "rosto"`). O firmware do S3 só executa a troca — não decide sozinho quando trocar.
+
+## Consequences
+Fica mais fácil manter a expressão da planta sincronizada com a resposta falada, já que os dois saem do mesmo dispositivo e da mesma requisição HTTP, sem depender de uma segunda mensagem para coordenar os dois ESPs. Fica mais difícil porque o contrato HTTP de áudio (Seção 8.4 do Arc42) precisa ganhar esse campo extra, e o ESP32-WROOM deixa de ter qualquer indicação visual local — se o WROOM ficar offline mas o S3 continuar ligado, o usuário não percebe isso olhando para o vaso (mitigado pelo app já indicar o status offline, REQ-FUNC-007). O formato exato desse campo deve ser definido junto com o restante do contrato de áudio, ainda em aberto na ADR-017 — **[A DEFINIR]**.
+
+---
+
+# ADR-024 — pH simulado na demonstração
+
+## Status
+Aceita — combinada com o professor orientador
+
+## Context
+A sonda de pH é o componente de maior risco do projeto: sondas baratas têm calibração inconsistente e se degradam (SRS, Seção 3.3.3; Arc42, Seção 11). O pH alimenta o estado da planta e as respostas do assistente, e o prazo não permite esperar uma sonda confiável para integrar o restante do sistema.
+
+## Decision
+Na demonstração, o firmware publica um valor de pH **simulado**, entre 6,0 e 7,0, dentro da faixa que o backend considera adequada (5,5 a 7,5). O contrato continua o mesmo (campo `ph` obrigatório, de 0 a 14) e o backend e o assistente tratam o valor como uma leitura normal. A apresentação deve dizer claramente que o pH é simulado.
+
+## Consequences
+Fica mais fácil integrar e demonstrar o sistema completo (app, histórico e assistente falando do pH) sem depender da sonda, e trocar o valor simulado pela sonda real mexe só no firmware, sem mudar contrato, backend nem app. Fica mais difícil porque o alerta `ph_fora_da_faixa` não dispara na demonstração (a menos que o firmware simule um valor fora da faixa de propósito), o assistente fala do pH como se tivesse sido medido, e existe o risco de ele ser apresentado como real. Marcar o dado como simulado no próprio payload (por exemplo, com um campo extra) é uma melhoria possível **[A DEFINIR]**.
+
+---
+
+# ADR-025 — Pedido de rega como saída estruturada, validado e confirmado pelo backend
+
+## Status
+Aceita — ajusta o item 2 da ADR-021 (que previa function calling) e define os limites iniciais da rega; os valores ainda precisam de calibração real
+
+## Context
+A ADR-021 decidiu que o Gemini apenas devolve o pedido de rega e o backend valida antes de agir. Ao implementar, a entrada em áudio já usava saída JSON com schema (`pergunta_ouvida` e `resposta`). Combinar function calling com saída estruturada na mesma chamada não pôde ser confirmado nos modelos usados, e uma segunda chamada ao modelo só para falar o resultado dobraria a latência e deixaria o LLM livre para prometer algo que o backend recusou.
+
+## Decision
+1. **Saída estruturada.** O Gemini devolve, junto da resposta, um campo `acao` com `tipo` (`nenhuma`, `regar` ou `cancelar`), `daqui_a_s` ou `as_hora` ("HH:MM") e `duracao_s` opcional. Texto e áudio usam o mesmo formato, em uma única chamada. O princípio da ADR-021 não muda: o LLM só propõe e nunca aciona a bomba.
+2. **O backend decide e fala.** A confirmação ou recusa é uma frase escrita pelo backend, com o horário e a duração realmente agendados, que substitui a frase do modelo. Numa rega "de agora", o backend espera o resultado e, se falhar, a planta diz que não conseguiu.
+3. **Travas independentes do LLM.** O pedido só é aceito se a fala da pessoa contiver uma palavra de rega (regar, molhar, irrigar) e, no áudio, se houver transcrição: silêncio ou ruído nunca viram rega. Se a saída do modelo vier torta, nenhuma ação é tomada.
+4. **Limites iniciais:** atraso máximo de 24 h; duração máxima de 10 s (padrão 5 s); intervalo mínimo de 10 min entre regas; recusa se o vaso estiver offline ou sem leitura; recusa a rega de agora se o solo estiver acima de 80% ou a bomba já estiver ligada. A reconferência de vaso online e solo encharcado é refeita na hora de regar. Tolerância de 5 min no reinício. Todos configuráveis por variável de ambiente.
+5. **Execução sem duplicar.** O backend reivindica o agendamento (`pendente` para `executando`, em transação do Firestore) antes de publicar. No reinício, `pendente` dentro da tolerância executa uma vez, fora dela vira `expirada`, e `executando` vira `falhou` (nunca repete).
+6. **Comando ao vaso:** `greensync/{deviceId}/comandos`, QoS 1, **sem retain**, payload `{"acao":"regar","duracao_s":5,"id":"<idAgendamento>"}`. O firmware deve ignorar `id` repetido (o QoS 1 pode entregar duas vezes) e manter o próprio tempo máximo de bomba ligada.
+
+## Consequences
+Fica mais fácil garantir a segurança (várias camadas independentes do modelo, uma única chamada ao LLM, frases sempre verdadeiras) e testar tudo com dados simulados. Fica mais difícil porque o prompt carrega regras de extração de horário que precisam ser validadas com o Gemini real (`tests/manual_rega.py`), a confirmação perde um pouco da personalidade da planta por ser uma frase fixa, o firmware precisa assinar o tópico de comandos e tratar `id` repetido, e a precedência entre a irrigação automática por umidade e a rega agendada continua em aberto **[A DEFINIR]**. "Concluída" no backend quer dizer "comando publicado": só o firmware sabe se a bomba girou.
+
+---
+
+# ADR-026 — Dados desatualizados e tolerância a falhas do assistente
+
+## Status
+Aceita
+
+## Context
+Se o vaso para de enviar leituras ou cai da rede, o último valor gravado no Firestore continua lá, e o assistente poderia falar dele como se fosse o de agora (REQ-FUNC-007). Além disso, o Gemini mostrou-se instável nos testes (timeouts e erros 503 no modelo principal), e o Redis, que guarda o limite de perguntas, pode ficar fora do ar.
+
+## Decision
+1. **Frescor no backend.** Cada leitura gravada leva `updated_at` com a hora do servidor e marca o vaso como `online`; o Last Will marca `offline`. O backend classifica os dados como atuais, desatualizados (mais de 120 s sem leitura, ou vaso offline) ou sem dados, e o prompt manda a planta avisar que são os últimos dados e há quanto tempo, sem inventar a causa. Sem `updated_at`, a idade é desconhecida e o dado não é marcado como velho (a menos que esteja offline). O display recebe `atuais` em `X-Dados`.
+2. **Modelo reserva.** Há um modelo principal e um reserva, para texto e para voz. Erro 5xx: uma nova tentativa no mesmo modelo; timeout, erro 4xx ou resposta vazia: vai ao reserva; se todos falham, a rota responde 502. Prazos: 8 s (texto), 12 s (entender o áudio), 15 s (voz).
+3. **Limite de perguntas "fail-open".** O limite usa janela fixa no Redis (10 por 60 s por chave). Se o Redis não estiver configurado ou cair, a pergunta passa e o erro é logado.
+4. **Ordem das checagens e privacidade.** Chave, `device_id` e validação do áudio vêm antes do limite, para requisições inválidas não gastarem o limite nem o Gemini. O que a pessoa falou ou escreveu não vai para o log.
+
+## Consequences
+Fica mais fácil manter o assistente honesto e no ar mesmo com o vaso offline, o Gemini lento ou o Redis fora; o app e o display podem avisar que o dado é velho. Fica mais difícil porque o limite de 120 s precisa combinar com o intervalo de publicação do firmware (10 a 30 s), o modelo reserva pode ter qualidade ou latência diferentes, sem Redis o limite deixa de proteger a cota do Gemini (aceito, e há aviso no log de inicialização), e o pior caso de latência soma tentativas (o cliente do S3 deve usar timeout de pelo menos 30 s).
