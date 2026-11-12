@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "762161544110",
+    "project_id": "greensync-93db9",
+    "storage_bucket": "greensync-93db9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:762161544110:android:64d3fc3457ca58ee0a263f",
+        "android_client_info": {
+          "package_name": "com.example.greensync_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4V1uLvWJLvYHyvZZuuXsTrFteXGFqebs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
