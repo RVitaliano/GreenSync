@@ -110,7 +110,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (654 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (740 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -175,6 +175,7 @@ Detalhes completos em `docs/Arc42_GreenSync_SDD.md`, Seção 8.1.
   ```
   `umidade_ar` e `timestamp` são opcionais; sem `timestamp`, o backend usa a hora do servidor.
 - **Status** — `greensync/{deviceId}/status` → `{"status": "online"}` (retido, ao conectar) ou `{"status": "offline"}` (Last Will do broker).
+- **Progresso do OTA** (vaso → backend) — `greensync/{deviceId}/ota`, QoS 1 → `{"alvo": "wroom", "id": "<id do comando>", "estado": "baixando" | "aplicando" | "ok" | "falhou" | "revertido", "versao": "1.2.0", "erro": "hash"}` (`erro` é um código curto, só em falhou/revertido). Só vale para a atualização atual (mesmo `id` e `alvo`), em ordem, e é refletido em `devices/{id}.ota`; a versão instalada continua vindo do status (`fw`, `fw_s3`).
 - **Comandos** (backend → vaso) — `greensync/{deviceId}/comandos`, QoS 1, **sem retain**:
   ```json
   {"acao": "regar", "duracao_s": 5, "id": "<idAgendamento>"}
@@ -204,7 +205,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `MQTT_HOST` / `MQTT_PORT` | Endereço do broker (Mosquitto local ou EMQX Cloud) |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | Credenciais do broker (vazias no Mosquitto local) |
 | `MQTT_USE_TLS` | `false` local, `true` no EMQX Cloud |
-| `MQTT_TOPIC_SENSORES` / `MQTT_TOPIC_STATUS` | Tópicos assinados |
+| `MQTT_TOPIC_SENSORES` / `MQTT_TOPIC_STATUS` / `MQTT_TOPIC_OTA` | Tópicos assinados (sensores, status e progresso do OTA) |
 | `MQTT_TOPIC_COMANDOS` | Tópico dos comandos (`greensync/{device_id}/comandos`) |
 | `FIREBASE_CREDENTIALS_PATH` | Caminho da chave de serviço do Firebase |
 | `GEMINI_API_KEY` | Chave da API do Gemini |

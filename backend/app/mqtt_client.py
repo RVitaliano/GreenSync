@@ -9,7 +9,8 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.firebase_client import save_reading, save_status
-from app.models import DeviceStatus, SensorReading
+from app.models import DeviceStatus, OtaProgresso, SensorReading
+from app.ota.progresso import tratar_progresso
 from app.seguranca import DEVICE_ID_PADRAO
 
 logger = logging.getLogger("greensync.mqtt")
@@ -79,6 +80,15 @@ async def handle_message(message: aiomqtt.Message) -> None:
             status = DeviceStatus.model_validate_json(message.payload)
             logger.info("[%s] status: %s", device_id, status.status)
             await save_status(device_id, status.status, fw=status.fw, fw_s3=status.fw_s3)
+        elif kind == "ota":
+            try:
+                progresso = OtaProgresso.model_validate_json(message.payload)
+            except ValidationError as exc:
+                # Só onde e por quê falhou: nunca o payload (nem pedaços dele).
+                logger.warning("[%s] progresso de OTA inválido, descartado: %s", device_id,
+                               [(".".join(str(p) for p in e["loc"]), e["type"]) for e in exc.errors()])
+                return
+            await tratar_progresso(device_id, progresso)
         else:
             logger.warning("[%s] tipo de tópico desconhecido: %s", device_id, kind)
     except ValidationError as exc:
@@ -106,6 +116,7 @@ async def run_mqtt_subscriber() -> None:
                 )
                 await client.subscribe(settings.mqtt_topic_sensores, qos=1)
                 await client.subscribe(settings.mqtt_topic_status, qos=1)
+                await client.subscribe(settings.mqtt_topic_ota, qos=1)
                 _cliente = client
 
                 async for message in client.messages:

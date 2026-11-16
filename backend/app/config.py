@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     mqtt_use_tls: bool = False
     mqtt_topic_sensores: str = "greensync/+/sensores"
     mqtt_topic_status: str = "greensync/+/status"
+    mqtt_topic_ota: str = "greensync/+/ota"      # progresso da atualização enviado pelo vaso
 
     # Firebase
     firebase_credentials_path: str = "serviceAccountKey.json"
