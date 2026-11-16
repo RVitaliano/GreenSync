@@ -10,6 +10,7 @@ from app.firebase_client import init_firebase
 from app.mqtt_client import run_mqtt_subscriber
 from app.redis_client import close_redis
 from app.routes.audio import router as audio_router
+from app.routes.dispositivos import router as dispositivos_router
 from app.routes.ia import router as ia_router
 
 
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="GreenSync Backend", lifespan=lifespan)
 app.include_router(ia_router)
 app.include_router(audio_router)
+app.include_router(dispositivos_router)
 
 
 @app.get("/")

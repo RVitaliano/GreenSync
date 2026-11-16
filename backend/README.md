@@ -37,6 +37,7 @@ backend/
     routes/
       ia.py              # POST /perguntar
       audio.py           # POST /audio
+      dispositivos.py    # POST /dispositivos/{device_id}/regar (rega manual do app)
     ai/
       estado.py          # estado da planta (limiares) e frescor dos dados
       prompt.py          # personalidade da planta + dados reais + regras da rega
@@ -107,7 +108,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (440 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (476 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -142,6 +143,10 @@ Contrato completo (e o que o firmware do S3 precisa saber, como o timeout de pel
 ### Rega por voz
 
 Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s; a demonstração usa 15 s no `.env`), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Ver Seção 8.5 do Arc42.
+
+### `POST /dispositivos/{device_id}/regar` (botão "Regar agora" do app)
+
+Cabeçalho `X-API-Key`; corpo opcional `{"duracao_s": 7}` (sem ele vale o padrão; menor que 1 ou não inteiro dá 422). Responde `{"resultado": "agendada" | "recusada" | "falhou", "id", "motivo"}`; em `recusada`, `motivo` é o código da regra (`sem_dados`, `offline`, `solo_encharcado`, `bomba_ligada`, `intervalo`, `duracao_grande`...). Erro inesperado: 502. Não usa Gemini nem o limite de perguntas; valem as mesmas regras da rega por voz.
 
 ## Contrato MQTT
 
