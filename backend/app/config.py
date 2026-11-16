@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     admin_api_key: str = ""
     # Hosts aceitos nas URLs dos binários, separados por vírgula (comparação exata, sem subdomínios).
     ota_hosts_permitidos: str = "github.com"
+    # Atualização "em curso" (solicitada/baixando/aplicando) parada há mais que isso é considerada
+    # travada, e uma nova pode ser pedida.
+    ota_timeout_s: int = 600
 
     # --- Redis e limite de perguntas (REQ-FUNC-015) ---
     # Ex.: redis://redis:6379/0. Vazia = sem Redis, e o limite fica DESLIGADO.
