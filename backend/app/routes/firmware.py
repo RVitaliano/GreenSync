@@ -64,9 +64,27 @@ async def registrar_firmware(alvo: str, body: FirmwareIn):
         registro = await repositorio.registrar(alvo, versao, url, sha256, notas)
     except repositorio.VersaoJaRegistrada:
         raise HTTPException(status_code=409, detail="esta versão já é a atual deste alvo")
+    except repositorio.VersaoBloqueada:
+        raise HTTPException(status_code=409, detail="versao_bloqueada: esta versão foi retirada e não pode ser registrada de novo")
     except Exception:
         log.exception("[%s] erro ao registrar firmware", alvo)
         raise HTTPException(status_code=502, detail="não foi possível registrar o firmware agora")
 
     log.info("[%s] firmware %s registrado", alvo, versao)
+    return _json(registro)
+
+
+@router.post("/firmware/{alvo}/retirar", dependencies=[Depends(exigir_admin)])
+async def retirar_firmware(alvo: str):
+    """Retira a versão atual (ela fica bloqueada) e volta o registro para a anterior."""
+    if alvo not in validacao.ALVOS:
+        raise HTTPException(status_code=404, detail="alvo desconhecido")
+    try:
+        registro = await repositorio.retirar(alvo)
+    except repositorio.SemVersaoAnterior:
+        raise HTTPException(status_code=409, detail="sem_versao_anterior: não há versão anterior para voltar")
+    except Exception:
+        log.exception("[%s] erro ao retirar firmware", alvo)
+        raise HTTPException(status_code=502, detail="não foi possível retirar o firmware agora")
+    log.info("[%s] firmware retirado; registro volta para %s", alvo, registro["versao"])
     return _json(registro)

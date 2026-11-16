@@ -1,6 +1,7 @@
 """Registro de firmware no Firestore: firmware/{alvo} (alvo = "wroom" ou "s3").
 
-Campos: versao, url, sha256, notas, publicado_em, anterior ({versao, url, sha256} ou null).
+Campos: versao, url, sha256, notas, publicado_em, anterior ({versao, url, sha256} ou null) e
+bloqueadas (lista de versões que não podem mais ser registradas; ausente = lista vazia).
 O SDK é síncrono, então tudo roda em asyncio.to_thread (como em agenda/repositorio.py).
 """
 import asyncio
@@ -17,23 +18,50 @@ class VersaoJaRegistrada(Exception):
     """A versão enviada já é a versão atual do alvo."""
 
 
+class VersaoBloqueada(Exception):
+    """A versão enviada foi retirada antes (está em "bloqueadas") e não pode voltar a ser registrada."""
+
+
+class SemVersaoAnterior(Exception):
+    """Não há registro atual com uma versão "anterior" para a qual voltar."""
+
+
 def _agora() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _bloqueadas(atual: dict | None) -> list:
+    return list((atual or {}).get("bloqueadas") or [])
 
 
 def montar_registro(atual: dict | None, versao: str, url: str, sha256: str, notas: str | None,
                     agora: datetime) -> dict:
     """Regra pura: o registro atual vira "anterior" e o novo entra no lugar.
 
-    Versão igual à atual é conflito; versão menor é permitida (voltar é permitido).
+    Versão igual à atual é conflito; versão bloqueada (retirada antes) é recusada; versão menor
+    é permitida (voltar é permitido).
     """
     if atual and atual.get("versao") == versao:
         raise VersaoJaRegistrada(versao)
+    if versao in _bloqueadas(atual):
+        raise VersaoBloqueada(versao)
     anterior = None
     if atual and atual.get("versao"):
         anterior = {"versao": atual.get("versao"), "url": atual.get("url"), "sha256": atual.get("sha256")}
     return {"versao": versao, "url": url, "sha256": sha256, "notas": notas,
-            "publicado_em": agora, "anterior": anterior}
+            "publicado_em": agora, "anterior": anterior, "bloqueadas": _bloqueadas(atual)}
+
+
+def montar_retirada(atual: dict | None, agora: datetime) -> dict:
+    """Regra pura: a versão atual é bloqueada e a "anterior" volta a ser a atual."""
+    anterior = (atual or {}).get("anterior")
+    if not atual or not atual.get("versao") or not anterior or not anterior.get("versao"):
+        raise SemVersaoAnterior()
+    bloqueadas = _bloqueadas(atual)
+    if atual["versao"] not in bloqueadas:
+        bloqueadas.append(atual["versao"])
+    return {"versao": anterior["versao"], "url": anterior.get("url"), "sha256": anterior.get("sha256"),
+            "notas": None, "publicado_em": agora, "anterior": None, "bloqueadas": bloqueadas}
 
 
 def _ref(alvo: str):
@@ -60,8 +88,31 @@ def _registrar_sync(alvo: str, versao: str, url: str, sha256: str, notas: str | 
     return _tx(db.transaction())
 
 
+def _retirar_sync(alvo: str) -> dict:
+    db = init_firebase()
+    ref = _ref(alvo)
+
+    @firestore.transactional
+    def _tx(transaction) -> dict:
+        snap = ref.get(transaction=transaction)
+        atual = snap.to_dict() if snap.exists else None
+        novo = montar_retirada(atual, _agora())
+        transaction.set(ref, novo)
+        return novo
+
+    return _tx(db.transaction())
+
+
 async def ler(alvo: str) -> dict | None:
     return await asyncio.to_thread(_ler_sync, alvo)
+
+
+async def retirar(alvo: str) -> dict:
+    """Retira a versão atual (ela vai para "bloqueadas") e volta para a "anterior", em transação.
+
+    Levanta SemVersaoAnterior se não houver registro atual com "anterior".
+    """
+    return await asyncio.to_thread(_retirar_sync, alvo)
 
 
 async def registrar(alvo: str, versao: str, url: str, sha256: str, notas: str | None = None) -> dict:

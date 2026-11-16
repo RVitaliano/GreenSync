@@ -28,20 +28,34 @@ def _recusa(motivo: str) -> dict:
 
 
 async def solicitar_atualizacao(device_id: str, alvo: str, leitura: dict | None, estado: dict) -> dict:
-    """Devolve {"resultado": "solicitada"|"recusada"|"falhou", "id", "motivo", "versao"}.
+    """Pede ao vaso que instale a versão do registro. Devolve {"resultado", "id", "motivo", "versao"}.
 
     Erros inesperados (Firestore fora do ar etc.) sobem para a rota responder 502.
     """
+    return await _solicitar("atualizar", device_id, alvo, leitura, estado)
+
+
+async def solicitar_reversao(device_id: str, alvo: str, leitura: dict | None, estado: dict) -> dict:
+    """Pede ao vaso que volte para a cópia anterior; `versao` é a versão BOA do registro.
+
+    As regras e o fluxo são os da atualização; só o comando muda (sem url nem sha256: o vaso usa
+    a cópia que já tem e confere que é a versão esperada).
+    """
+    return await _solicitar("reverter", device_id, alvo, leitura, estado)
+
+
+async def _solicitar(tipo: str, device_id: str, alvo: str, leitura: dict | None, estado: dict) -> dict:
     registro = await repositorio.ler(alvo)
     if not registro:
         return _recusa("sem_firmware")
     try:
         versao = validacao.validar_versao(registro.get("versao"))
-        url = validacao.validar_url(registro.get("url"))
-        sha256 = validacao.validar_sha256(registro.get("sha256"))
+        if tipo == "atualizar":
+            url = validacao.validar_url(registro.get("url"))
+            sha256 = validacao.validar_sha256(registro.get("sha256"))
     except validacao.ErroValidacao as e:
         # Registro antigo/torto, ou host que saiu da lista permitida: nunca manda ao vaso.
-        log.warning("[%s] registro de firmware inválido, atualização recusada: %s", alvo, e)
+        log.warning("[%s] registro de firmware inválido, %s recusada: %s", alvo, tipo, e)
         return _recusa("firmware_invalido")
 
     # Mesmo critério da rega. Para o S3 o "online" é o WROOM, que é quem fala MQTT.
@@ -65,23 +79,27 @@ async def solicitar_atualizacao(device_id: str, alvo: str, leitura: dict | None,
     async with trava:
         ganhou = await repositorio.reivindicar_ota(
             device_id,
-            {"alvo": alvo, "id": ota_id, "versao": versao, "estado": "solicitada", "atualizado_em": agora},
+            {"alvo": alvo, "id": ota_id, "versao": versao, "tipo": tipo, "estado": "solicitada",
+             "atualizado_em": agora},
             settings.ota_timeout_s,
         )
         if not ganhou:
             return _recusa("ota_em_curso")
 
-        comando = {"acao": "atualizar", "alvo": alvo, "id": ota_id, "versao": versao, "url": url, "sha256": sha256}
+        if tipo == "atualizar":
+            comando = {"acao": "atualizar", "alvo": alvo, "id": ota_id, "versao": versao, "url": url, "sha256": sha256}
+        else:
+            comando = {"acao": "reverter", "alvo": alvo, "id": ota_id, "versao": versao}
         try:
             await publicar_comando(device_id, comando)
         except Exception as e:
             motivo = MOTIVO_INCERTO if getattr(e, "incerta", False) else "não consegui falar com o broker"
-            log.error("[%s] atualização %s: publicação falhou: %s", device_id, ota_id, type(e).__name__)
+            log.error("[%s] %s %s: publicação falhou: %s", device_id, tipo, ota_id, type(e).__name__)
             try:
                 await repositorio.marcar_ota(device_id, ota_id, "falhou", motivo)
             except Exception:
-                log.exception("[%s] atualização %s: não consegui marcar como falhou", device_id, ota_id)
+                log.exception("[%s] %s %s: não consegui marcar como falhou", device_id, tipo, ota_id)
             return {"resultado": "falhou", "id": ota_id, "motivo": motivo, "versao": versao}
 
-    log.info("[%s] atualização %s (%s %s) solicitada", device_id, ota_id, alvo, versao)
+    log.info("[%s] %s %s (%s %s) solicitada", device_id, tipo, ota_id, alvo, versao)
     return {"resultado": "solicitada", "id": ota_id, "motivo": None, "versao": versao}

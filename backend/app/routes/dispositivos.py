@@ -2,13 +2,14 @@
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Path
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, Field, StrictInt
 
 from app.agenda.servico import regar_agora
 from app.ai.estado import avaliar_estado
 from app.firebase_client import ler_leitura_segura
-from app.ota.servico import solicitar_atualizacao
+from app.ota.servico import solicitar_atualizacao, solicitar_reversao
+from app.routes.firmware import exigir_admin
 from app.seguranca import DEVICE_ID_PADRAO, chave_valida
 
 log = logging.getLogger("greensync.dispositivos")
@@ -62,3 +63,15 @@ async def atualizar(
     except Exception:
         log.exception("[%s] erro ao processar o pedido de atualização", device_id)
         raise HTTPException(status_code=502, detail="não foi possível processar a atualização agora")
+
+
+@router.post("/dispositivos/{device_id}/reverter", dependencies=[Depends(exigir_admin)])
+async def reverter(body: AtualizarIn, device_id: str = Path(pattern=DEVICE_ID_PADRAO)):
+    """Manda o vaso voltar para a cópia anterior do firmware. Só administração (X-Admin-Key)."""
+    try:
+        leitura = await ler_leitura_segura(device_id)
+        estado = avaliar_estado(leitura)
+        return await solicitar_reversao(device_id, body.alvo, leitura, estado)
+    except Exception:
+        log.exception("[%s] erro ao processar o pedido de reversão", device_id)
+        raise HTTPException(status_code=502, detail="não foi possível processar a reversão agora")

@@ -110,7 +110,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (740 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (800 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -153,6 +153,14 @@ Cabeçalho `X-API-Key`; corpo opcional `{"duracao_s": 7}` (sem ele vale o padrã
 ### `POST /dispositivos/{device_id}/atualizar` (pede ao vaso para se atualizar)
 
 Cabeçalho `X-API-Key`; corpo `{"alvo": "wroom" | "s3"}` (outro valor: 422). Versão, URL e hash vêm sempre do registro `firmware/{alvo}`; o app não consegue enviá-los. Responde `{"resultado": "solicitada" | "recusada" | "falhou", "id", "motivo", "versao"}`; recusas: `sem_firmware`, `firmware_invalido`, `sem_dados`, `offline`, `bomba_ligada`, `versao_igual`, `ota_em_curso` (nada é publicado). Grava `devices/{id}.ota` (`solicitada`) numa transação antes de publicar `{"acao":"atualizar",...}` no MQTT (QoS 1, sem retain); atualização parada há mais de `OTA_TIMEOUT_S` (600 s) é considerada travada. Os estados seguintes (baixando, aplicando, ok...) ainda não são escritos.
+
+### `POST /dispositivos/{device_id}/reverter` (administração: volta o vaso para a cópia anterior)
+
+Cabeçalho `X-Admin-Key` (a `X-API-Key` do app não vale; `ADMIN_API_KEY` vazia = 403); corpo `{"alvo": "wroom" | "s3"}`. Mesmas recusas e mesmo fluxo do `atualizar` (`sem_firmware`, `sem_dados`, `offline`, `bomba_ligada`, `versao_igual`, `ota_em_curso`), mas publica `{"acao":"reverter","alvo","id","versao"}` (a versão boa do registro; sem url nem hash) e grava `ota.tipo = "reverter"`. O `atualizar` passa a gravar `ota.tipo = "atualizar"`.
+
+### `POST /firmware/{alvo}/retirar` (administração: retira a versão atual do registro)
+
+`X-Admin-Key`. A versão atual entra em `bloqueadas` (o `PUT /firmware/{alvo}` passa a recusá-la com 409 `versao_bloqueada`) e a `anterior` volta a ser a atual. Sem `anterior`: 409 `sem_versao_anterior`. Responde com o registro novo e a lista de `bloqueadas`.
 
 ### `PUT /firmware/{alvo}` (administração do OTA)
 
