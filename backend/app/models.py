@@ -7,9 +7,14 @@
 # greensync/{deviceId}/status
 # {"status": "online"} ou {"status": "offline"}
 
+import logging
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.ota.validacao import versao_ou_none
+
+logger = logging.getLogger("greensync.models")
 
 
 class SensorReading(BaseModel):
@@ -27,3 +32,17 @@ class DeviceStatus(BaseModel):
     """Payload de status (Last Will é publicado pelo broker)."""
 
     status: Literal["online", "offline"]
+    # Versão do firmware de cada placa (opcional; o Last Will não traz). Valor fora do
+    # formato vira None e não derruba o status.
+    fw: Optional[str] = None
+    fw_s3: Optional[str] = None
+
+    @field_validator("fw", "fw_s3", mode="before")
+    @classmethod
+    def _versao_valida(cls, v, info):
+        if v is None:
+            return None
+        valida = versao_ou_none(v)
+        if valida is None:
+            logger.warning("versão de firmware inválida em %s, ignorada", info.field_name)
+        return valida

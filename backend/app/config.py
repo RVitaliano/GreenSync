@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     # --- API HTTP ---
     api_key: str = ""  # se vazia, a rota fica aberta (só para desenvolvimento)
 
+    # --- OTA (registro de firmware) ---
+    # Chave da rota de administração (X-Admin-Key). Aqui o padrão é FECHADO: vazia = rota desligada (403).
+    admin_api_key: str = ""
+    # Hosts aceitos nas URLs dos binários, separados por vírgula (comparação exata, sem subdomínios).
+    ota_hosts_permitidos: str = "github.com"
+
     # --- Redis e limite de perguntas (REQ-FUNC-015) ---
     # Ex.: redis://redis:6379/0. Vazia = sem Redis, e o limite fica DESLIGADO.
     redis_url: str = ""

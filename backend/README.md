@@ -38,6 +38,8 @@ backend/
       ia.py              # POST /perguntar
       audio.py           # POST /audio
       dispositivos.py    # POST /dispositivos/{device_id}/regar (rega manual do app)
+      firmware.py        # PUT /firmware/{alvo} (registro de firmware para o OTA, só administração)
+    ota/                 # validação (alvo, versão, sha256, url) e registro de firmware no Firestore
     ai/
       estado.py          # estado da planta (limiares) e frescor dos dados
       prompt.py          # personalidade da planta + dados reais + regras da rega
@@ -108,7 +110,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (476 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (592 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -147,6 +149,10 @@ Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a
 ### `POST /dispositivos/{device_id}/regar` (botão "Regar agora" do app)
 
 Cabeçalho `X-API-Key`; corpo opcional `{"duracao_s": 7}` (sem ele vale o padrão; menor que 1 ou não inteiro dá 422). Responde `{"resultado": "agendada" | "recusada" | "falhou", "id", "motivo"}`; em `recusada`, `motivo` é o código da regra (`sem_dados`, `offline`, `solo_encharcado`, `bomba_ligada`, `intervalo`, `duracao_grande`...). Erro inesperado: 502. Não usa Gemini nem o limite de perguntas; valem as mesmas regras da rega por voz.
+
+### `PUT /firmware/{alvo}` (administração do OTA)
+
+Alvo `wroom` ou `s3` (outro: 404). Cabeçalho `X-Admin-Key` (a `API_KEY` do app não vale); `ADMIN_API_KEY` vazia = rota desligada (403). Corpo `{"versao": "1.0.0", "url": "https://github.com/...", "sha256": "<64 hex>", "notas": "opcional"}`; só https, com host em `OTA_HOSTS_PERMITIDOS` (padrão `github.com`). Corpo inválido: 422; versão igual à atual: 409; sucesso: 200 com o registro gravado em `firmware/{alvo}` (o anterior vai para o campo `anterior`). Só registra: nenhum comando é enviado ao vaso. O status MQTT aceita `fw` e `fw_s3` opcionais, gravados em `devices/{id}`.
 
 ## Contrato MQTT
 
@@ -213,6 +219,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `AUDIO_MAX_BYTES` / `AUDIO_MAX_S` | Tamanho (padrão 1000000 bytes) e duração (15 s) máximos do áudio recebido |
 | `TOM_PLANTA` | `planta` (divertido, padrão) ou `informativo` |
 | `SOLO_SECO_ABAIXO` / `SOLO_ENCHARCADO_ACIMA` / `TEMP_MIN` / `TEMP_MAX` / `PH_MIN` / `PH_MAX` | Limiares do estado da planta (padrão 30 %, 80 %, 10 °C, 35 °C, 5,5 e 7,5) |
+| `ADMIN_API_KEY` / `OTA_HOSTS_PERMITIDOS` | Chave da rota de firmware (vazia = desligada) e hosts permitidos nas URLs dos binários, separados por vírgula (padrão `github.com`) |
 | `LOG_LEVEL` | Nível de log (`DEBUG`, `INFO`, `WARNING`...; valor desconhecido vale `INFO`) |
 
 ## Estado atual

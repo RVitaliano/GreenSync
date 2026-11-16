@@ -11,6 +11,7 @@ from app.mqtt_client import run_mqtt_subscriber
 from app.redis_client import close_redis
 from app.routes.audio import router as audio_router
 from app.routes.dispositivos import router as dispositivos_router
+from app.routes.firmware import router as firmware_router
 from app.routes.ia import router as ia_router
 
 
@@ -33,10 +34,17 @@ def avisar_configuracao() -> None:
                        "(só para desenvolvimento)")
 
 
+def avisar_firmware() -> None:
+    """Aviso de inicialização da rota de firmware (função própria, chamada após avisar_configuracao)."""
+    if not settings.admin_api_key:
+        logger.warning("ADMIN_API_KEY vazia: a rota de firmware (PUT /firmware/{alvo}) está DESLIGADA")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_firebase()
     avisar_configuracao()
+    avisar_firmware()
     task = asyncio.create_task(run_mqtt_subscriber())
     try:
         await agendador.iniciar()   # recarrega as regas pendentes (REQ-FUNC-012)
@@ -53,6 +61,7 @@ app = FastAPI(title="GreenSync Backend", lifespan=lifespan)
 app.include_router(ia_router)
 app.include_router(audio_router)
 app.include_router(dispositivos_router)
+app.include_router(firmware_router)
 
 
 @app.get("/")

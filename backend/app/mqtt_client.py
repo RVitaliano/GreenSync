@@ -78,7 +78,7 @@ async def handle_message(message: aiomqtt.Message) -> None:
         elif kind == "status":
             status = DeviceStatus.model_validate_json(message.payload)
             logger.info("[%s] status: %s", device_id, status.status)
-            await save_status(device_id, status.status)
+            await save_status(device_id, status.status, fw=status.fw, fw_s3=status.fw_s3)
         else:
             logger.warning("[%s] tipo de tópico desconhecido: %s", device_id, kind)
     except ValidationError as exc:
