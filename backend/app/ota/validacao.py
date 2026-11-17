@@ -79,3 +79,26 @@ def validar_notas(valor) -> str | None:
     if not isinstance(valor, str) or len(valor) > NOTAS_MAX:
         raise ErroValidacao(f"notas inválidas (texto de até {NOTAS_MAX} caracteres)")
     return valor.strip() or None
+
+
+def _chave_semver(versao: str) -> tuple:
+    """Chave de ordenação semver: MAJOR.MINOR.PATCH numérico; "-rc1" vale MENOS que a versão final;
+    entre sufixos, número < texto e prefixo menor < prefixo maior (como no semver.org)."""
+    validar_versao(versao)
+    nucleo, _, pre = versao.partition("-")
+    numeros = tuple(int(n) for n in nucleo.split("."))
+    if not pre:
+        return (numeros, 1, ())
+    ids = tuple((0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split("."))
+    return (numeros, 0, ids)
+
+
+def comparar_versoes(a: str, b: str) -> int:
+    """-1 se a < b, 0 se iguais, 1 se a > b. Levanta ErroValidacao se alguma não for versão válida."""
+    ka, kb = _chave_semver(a), _chave_semver(b)
+    return (ka > kb) - (ka < kb)
+
+
+def versao_maior(a: str, b: str) -> bool:
+    """True só se `a` é estritamente maior que `b` (atualizar nunca baixa de versão)."""
+    return comparar_versoes(a, b) > 0

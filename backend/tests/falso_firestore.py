@@ -42,9 +42,12 @@ class Tx:
     def update(self, ref, mudanca):
         doc = self.db.store[ref.col][ref.id]
         for chave, valor in mudanca.items():
-            if "." in chave:
-                mapa, campo = chave.split(".", 1)
-                doc[mapa][campo] = valor
+            if "." in chave:                       # caminho aninhado: "ota_auto.wroom.ultimo_erro"
+                *caminho, campo = chave.split(".")
+                alvo = doc
+                for parte in caminho:
+                    alvo = alvo[parte]
+                alvo[campo] = valor
             else:
                 doc[chave] = valor
 
@@ -55,7 +58,11 @@ class DbFalso:
         self.barreira = None
 
     def collection(self, nome):
-        return SimpleNamespace(document=lambda doc_id: Ref(self, nome, doc_id))
+        def stream():
+            return [SimpleNamespace(id=i, to_dict=(lambda d=d: copy.deepcopy(d)))
+                    for i, d in list(self.store.get(nome, {}).items())]
+
+        return SimpleNamespace(document=lambda doc_id: Ref(self, nome, doc_id), stream=stream)
 
     def transaction(self):
         return Tx(self)

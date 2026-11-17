@@ -1,17 +1,18 @@
 """Administração do firmware (OTA): registra qual versão cada placa deve rodar.
 
-Só registra; nenhum comando é enviado ao vaso por aqui. Protegida por X-Admin-Key
-(ADMIN_API_KEY), que é DIFERENTE da API_KEY do app: a chave do app não abre esta rota.
+Só registra: nenhum comando é enviado ao vaso por esta rota, exceto com OTA_AUTO ligado, quando o
+PUT dispara o despacho automático em segundo plano (app/ota/automatico.py). Protegida por
+X-Admin-Key (ADMIN_API_KEY), que é DIFERENTE da API_KEY do app: a chave do app não abre esta rota.
 """
 import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
-from app.ota import repositorio, validacao
+from app.ota import automatico, repositorio, validacao
 from app.seguranca import admin_chave_valida
 
 log = logging.getLogger("greensync.firmware")
@@ -39,7 +40,7 @@ def _json(registro: dict) -> dict:
 
 
 @router.put("/firmware/{alvo}", dependencies=[Depends(exigir_admin)])
-async def registrar_firmware(alvo: str, body: FirmwareIn):
+async def registrar_firmware(alvo: str, body: FirmwareIn, background: BackgroundTasks):
     if alvo not in validacao.ALVOS:
         raise HTTPException(status_code=404, detail="alvo desconhecido")
 
@@ -71,6 +72,9 @@ async def registrar_firmware(alvo: str, body: FirmwareIn):
         raise HTTPException(status_code=502, detail="não foi possível registrar o firmware agora")
 
     log.info("[%s] firmware %s registrado", alvo, versao)
+    if settings.ota_auto:
+        # Depois que a resposta sai: não atrasa nem altera o PUT, e erro aqui nunca o afeta.
+        background.add_task(automatico.despachar_para_vasos_online, alvo)
     return _json(registro)
 
 

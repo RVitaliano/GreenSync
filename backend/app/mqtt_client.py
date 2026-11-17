@@ -76,10 +76,20 @@ async def handle_message(message: aiomqtt.Message) -> None:
             reading = SensorReading.model_validate_json(message.payload)
             logger.info("[%s] leitura válida: %s", device_id, reading)
             await save_reading(device_id, reading)
+            if settings.ota_auto:
+                # OTA automático: vaso pendente (recusado por sem_dados/bomba_ligada) tenta de novo agora que
+                # chegou leitura. Só consulta um dicionário em memória; sem Firestore para os demais.
+                from app.ota import automatico
+                automatico.retentar_se_pendente(device_id)
         elif kind == "status":
             status = DeviceStatus.model_validate_json(message.payload)
             logger.info("[%s] status: %s", device_id, status.status)
             await save_status(device_id, status.status, fw=status.fw, fw_s3=status.fw_s3)
+            if status.status == "online" and settings.ota_auto:
+                # Import aqui dentro: o serviço do OTA importa este módulo (publicar_comando).
+                from app.ota import automatico
+                # Em segundo plano: não segura a fila de mensagens MQTT esperando o Firestore.
+                automatico.em_segundo_plano(automatico.verificar_vaso_online(device_id))
         elif kind == "ota":
             try:
                 progresso = OtaProgresso.model_validate_json(message.payload)

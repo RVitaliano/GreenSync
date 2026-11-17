@@ -101,5 +101,14 @@ async def _solicitar(tipo: str, device_id: str, alvo: str, leitura: dict | None,
                 log.exception("[%s] %s %s: não consegui marcar como falhou", device_id, tipo, ota_id)
             return {"resultado": "falhou", "id": ota_id, "motivo": motivo, "versao": versao}
 
+    if tipo == "reverter" and isinstance(instalada, str) and instalada:
+        # A versão que está sendo revertida não pode ser reinstalada nem registrada de novo
+        # (o OTA automático também a ignora). Nunca bloqueia a versão atual do registro.
+        try:
+            if await repositorio.bloquear_versao(alvo, instalada):
+                log.info("[%s] versão %s bloqueada no registro de %s", device_id, instalada, alvo)
+        except Exception:
+            log.exception("[%s] não consegui bloquear a versão %s de %s", device_id, instalada, alvo)
+
     log.info("[%s] %s %s (%s %s) solicitada", device_id, tipo, ota_id, alvo, versao)
     return {"resultado": "solicitada", "id": ota_id, "motivo": None, "versao": versao}

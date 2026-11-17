@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     # Atualização "em curso" (solicitada/baixando/aplicando) parada há mais que isso é considerada
     # travada, e uma nova pode ser pedida.
     ota_timeout_s: int = 600
+    # OTA automático: ao registrar uma versão nova, ou quando um vaso fica online com versão menor,
+    # o backend manda o comando "atualizar" sozinho. Desligado por padrão.
+    ota_auto: bool = False
+    # Quantas vezes o automático tenta a MESMA versão em um vaso antes de desistir.
+    ota_auto_tentativas: int = 2
+    # Vaso recusado por sem_dados ou bomba_ligada é verificado de novo nas próximas leituras de
+    # sensores dele, no máximo isto de vezes.
+    ota_auto_retentativas: int = 3
 
     # --- Redis e limite de perguntas (REQ-FUNC-015) ---
     # Ex.: redis://redis:6379/0. Vazia = sem Redis, e o limite fica DESLIGADO.

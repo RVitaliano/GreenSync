@@ -239,13 +239,18 @@ def _progresso_sync(device_id: str, ota_id: str, alvo: str, estado: str, motivo:
     @firestore.transactional
     def _tx(transaction) -> str:
         snap = ref.get(transaction=transaction)
-        ota = ((snap.to_dict() or {}).get("ota")) if snap.exists else None
+        dados = (snap.to_dict() or {}) if snap.exists else {}
+        ota = dados.get("ota")
         decisao = decidir_progresso(ota, ota_id, alvo, estado)
         if decisao != "aplicar":
             return decisao
         mudanca = {"ota.estado": estado, "ota.atualizado_em": agora}
         if motivo:
             mudanca["ota.motivo"] = motivo
+        # Falha ou reversão de uma tentativa do OTA automático: guarda o último erro dela.
+        auto = entrada_auto(dados, alvo)
+        if estado in ("falhou", "revertido") and auto and auto.get("versao") == ota.get("versao"):
+            mudanca[f"ota_auto.{alvo}.ultimo_erro"] = motivo or estado
         transaction.update(ref, mudanca)
         return "aplicar"
 
@@ -256,3 +261,112 @@ async def aplicar_progresso(device_id: str, ota_id: str, alvo: str, estado: str,
                             motivo: str | None = None) -> str:
     """Reflete o progresso do vaso em devices/{id}.ota. Devolve "aplicar" ou o motivo de ter ignorado."""
     return await asyncio.to_thread(_progresso_sync, device_id, ota_id, alvo, estado, motivo, _agora())
+
+
+# ------------------------------------------------------------ OTA automático ----
+
+def _listar_dispositivos_sync() -> list[tuple[str, dict]]:
+    return [(d.id, d.to_dict() or {}) for d in init_firebase().collection("devices").stream()]
+
+
+async def listar_dispositivos() -> list[tuple[str, dict]]:
+    """(id, documento) de todos os vasos. Usado só quando uma versão nova é registrada."""
+    return await asyncio.to_thread(_listar_dispositivos_sync)
+
+
+def entrada_auto(dados: dict | None, alvo: str) -> dict | None:
+    """devices/{id}.ota_auto.{alvo} = {versao, tentativas, ultimo_erro}, ou None.
+
+    O formato antigo (um mapa só, com "alvo" e "versao" na raiz) não tem a chave do alvo e
+    por isso é ignorado: conta como "sem tentativas".
+    """
+    auto = (dados or {}).get("ota_auto")
+    entrada = auto.get(alvo) if isinstance(auto, dict) else None
+    return entrada if isinstance(entrada, dict) else None
+
+
+def _auto_com(dados: dict | None, alvo: str, entrada: dict) -> dict:
+    """O mapa `ota_auto` inteiro com a entrada deste alvo trocada. Só guarda chaves de alvo
+    conhecidas, o que também limpa o formato antigo na primeira gravação."""
+    auto = (dados or {}).get("ota_auto")
+    auto = auto if isinstance(auto, dict) else {}
+    novo = {k: auto[k] for k in ("wroom", "s3") if isinstance(auto.get(k), dict)}
+    novo[alvo] = entrada
+    return novo
+
+
+def _gravar_campo(transaction, ref, existe: bool, campo: str, valor: dict) -> None:
+    if existe:
+        transaction.update(ref, {campo: valor})
+    else:
+        transaction.set(ref, {campo: valor})
+
+
+def _registrar_tentativa_sync(device_id: str, alvo: str, versao: str, erro: str | None) -> int:
+    db = init_firebase()
+    ref = _dispositivo(device_id)
+
+    @firestore.transactional
+    def _tx(transaction) -> int:
+        snap = ref.get(transaction=transaction)
+        dados = (snap.to_dict() or {}) if snap.exists else {}
+        atual = entrada_auto(dados, alvo)
+        if atual and atual.get("versao") == versao:
+            tentativas = int(atual.get("tentativas") or 0) + 1
+            ultimo = erro if erro else atual.get("ultimo_erro")
+        else:                                  # versão nova para este alvo: a contagem recomeça
+            tentativas, ultimo = 1, erro
+        entrada = {"versao": versao, "tentativas": tentativas, "ultimo_erro": ultimo}
+        _gravar_campo(transaction, ref, snap.exists, "ota_auto", _auto_com(dados, alvo, entrada))
+        return tentativas
+
+    return _tx(db.transaction())
+
+
+def _zerar_tentativas_sync(device_id: str, alvo: str, versao: str) -> bool:
+    db = init_firebase()
+    ref = _dispositivo(device_id)
+
+    @firestore.transactional
+    def _tx(transaction) -> bool:
+        snap = ref.get(transaction=transaction)
+        dados = (snap.to_dict() or {}) if snap.exists else {}
+        atual = entrada_auto(dados, alvo)
+        if not atual or (not atual.get("tentativas") and not atual.get("ultimo_erro")):
+            return False                       # nada a zerar
+        entrada = {"versao": versao, "tentativas": 0, "ultimo_erro": None}
+        transaction.update(ref, {"ota_auto": _auto_com(dados, alvo, entrada)})
+        return True
+
+    return _tx(db.transaction())
+
+
+async def registrar_tentativa_auto(device_id: str, alvo: str, versao: str, erro: str | None = None) -> int:
+    """Conta mais uma tentativa automática desta versão neste vaso. Devolve o total."""
+    return await asyncio.to_thread(_registrar_tentativa_sync, device_id, alvo, versao, erro)
+
+
+async def zerar_tentativas_auto(device_id: str, alvo: str, versao: str) -> bool:
+    """O vaso alcançou a versão: zera as tentativas e o último erro (só se havia algo a zerar)."""
+    return await asyncio.to_thread(_zerar_tentativas_sync, device_id, alvo, versao)
+
+
+def _bloquear_sync(alvo: str, versao: str) -> bool:
+    db = init_firebase()
+    ref = _ref(alvo)
+
+    @firestore.transactional
+    def _tx(transaction) -> bool:
+        snap = ref.get(transaction=transaction)
+        atual = snap.to_dict() if snap.exists else None
+        if not atual or atual.get("versao") == versao or versao in _bloqueadas(atual):
+            return False                       # sem registro, é a atual, ou já estava bloqueada
+        transaction.update(ref, {"bloqueadas": _bloqueadas(atual) + [versao]})
+        return True
+
+    return _tx(db.transaction())
+
+
+async def bloquear_versao(alvo: str, versao: str) -> bool:
+    """Põe `versao` em "bloqueadas" do registro (sem duplicar e nunca a versão atual). True se mudou."""
+    return await asyncio.to_thread(_bloquear_sync, alvo, versao)

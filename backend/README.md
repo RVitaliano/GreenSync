@@ -110,7 +110,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (800 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (905 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -162,9 +162,20 @@ Cabeçalho `X-Admin-Key` (a `X-API-Key` do app não vale; `ADMIN_API_KEY` vazia 
 
 `X-Admin-Key`. A versão atual entra em `bloqueadas` (o `PUT /firmware/{alvo}` passa a recusá-la com 409 `versao_bloqueada`) e a `anterior` volta a ser a atual. Sem `anterior`: 409 `sem_versao_anterior`. Responde com o registro novo e a lista de `bloqueadas`.
 
+### OTA automático (`OTA_AUTO`, desligado por padrão)
+
+Com `OTA_AUTO=true`, o backend manda o comando `atualizar` sozinho, reaproveitando o mesmo serviço da rota `/atualizar` (todas as recusas valem: offline, `bomba_ligada`, `ota_em_curso`...). Dois gatilhos, ambos em segundo plano (não atrasam o `PUT` nem o MQTT):
+
+- **`PUT /firmware/{alvo}`** com versão nova: tenta cada vaso `online` cuja versão instalada (`fw` para `wroom`, `fw_s3` para `s3`) seja **menor**.
+- **Status MQTT `online`**: confere o vaso que acabou de conectar. Se já alcançou a versão do registro, zera as tentativas.
+
+Só **sobe** de versão (comparação semver; `1.0.0-rc1` < `1.0.0`). Não atualiza se a versão instalada é desconhecida, se a do registro está em `bloqueadas`, se há atualização em andamento (solicitada, baixando, aplicando, com menos de `OTA_TIMEOUT_S`) ou se já houve `OTA_AUTO_TENTATIVAS` tentativas (padrão 2) dessa versão. As tentativas ficam em `devices/{id}.ota_auto.{alvo} = {versao, tentativas, ultimo_erro}` (um mapa por alvo: `wroom` e `s3` contam separado; o formato antigo, um mapa só, é ignorado); recusas (vaso offline, bomba ligada) não contam, só comandos realmente publicados. O `POST /dispositivos/{id}/reverter` passa a pôr a versão revertida (a instalada no vaso) em `bloqueadas` do registro.
+
+**Retentativa.** Se o despacho for recusado por `sem_dados` (vaso recém-conectado, sem leitura) ou `bomba_ligada`, o vaso entra numa lista **em memória** (`id -> alvos pendentes + contador`). A próxima leitura de sensores dele roda a verificação de novo, no máximo `OTA_AUTO_RETENTATIVAS` vezes (padrão 3; 0 desliga), e ele sai da lista ao resolver, ao esgotar as retentativas ou ao reiniciar o backend (um novo status `online` recomeça). A leitura de um vaso fora da lista só consulta esse dicionário: nenhum acesso ao Firestore. Outras recusas (offline, `versao_igual`, `ota_em_curso`...) não são retentadas.
+
 ### `PUT /firmware/{alvo}` (administração do OTA)
 
-Alvo `wroom` ou `s3` (outro: 404). Cabeçalho `X-Admin-Key` (a `API_KEY` do app não vale); `ADMIN_API_KEY` vazia = rota desligada (403). Corpo `{"versao": "1.0.0", "url": "https://github.com/...", "sha256": "<64 hex>", "notas": "opcional"}`; só https, com host em `OTA_HOSTS_PERMITIDOS` (padrão `github.com`). Corpo inválido: 422; versão igual à atual: 409; sucesso: 200 com o registro gravado em `firmware/{alvo}` (o anterior vai para o campo `anterior`). Só registra: nenhum comando é enviado ao vaso. O status MQTT aceita `fw` e `fw_s3` opcionais, gravados em `devices/{id}`.
+Alvo `wroom` ou `s3` (outro: 404). Cabeçalho `X-Admin-Key` (a `API_KEY` do app não vale); `ADMIN_API_KEY` vazia = rota desligada (403). Corpo `{"versao": "1.0.0", "url": "https://github.com/...", "sha256": "<64 hex>", "notas": "opcional"}`; só https, com host em `OTA_HOSTS_PERMITIDOS` (padrão `github.com`). Corpo inválido: 422; versão igual à atual: 409; sucesso: 200 com o registro gravado em `firmware/{alvo}` (o anterior vai para o campo `anterior`). Só registra: nenhum comando é enviado ao vaso (salvo com `OTA_AUTO` ligado, veja abaixo). O status MQTT aceita `fw` e `fw_s3` opcionais, gravados em `devices/{id}`.
 
 ## Contrato MQTT
 
@@ -215,7 +226,9 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `MQTT_USE_TLS` | `false` local, `true` no EMQX Cloud |
 | `MQTT_TOPIC_SENSORES` / `MQTT_TOPIC_STATUS` / `MQTT_TOPIC_OTA` | Tópicos assinados (sensores, status e progresso do OTA) |
 | `MQTT_TOPIC_COMANDOS` | Tópico dos comandos (`greensync/{device_id}/comandos`) |
-| `FIREBASE_CREDENTIALS_PATH` | Caminho da chave de serviço do Firebase |
+| `FIREBASE_CREDENTIALS_PATH` | Caminho da chave de serviço do Firebase (padrão `serviceAccountKey.json`; no Render, `/etc/secrets/<arquivo>`) |
+| `PORT` | Porta do servidor (padrão 8000; o Render define sozinho). Lida pelo `Dockerfile`, não pelo Python |
+| `RENDER` | Definida pelo próprio Render; liga as checagens de produção (chave vazia/fraca = não sobe). Não cadastre |
 | `GEMINI_API_KEY` | Chave da API do Gemini |
 | `GEMINI_MODEL` / `GEMINI_MODEL_FALLBACK` | Modelo principal (padrão `gemini-3.5-flash-lite`) e reserva (`gemini-3.1-flash-lite`, usada se o principal der timeout ou 5xx) |
 | `TTS_MODEL` / `TTS_MODEL_FALLBACK` | Modelos da voz (opcionais) |
@@ -233,6 +246,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `TOM_PLANTA` | `planta` (divertido, padrão) ou `informativo` |
 | `SOLO_SECO_ABAIXO` / `SOLO_ENCHARCADO_ACIMA` / `TEMP_MIN` / `TEMP_MAX` / `PH_MIN` / `PH_MAX` | Limiares do estado da planta (padrão 30 %, 80 %, 10 °C, 35 °C, 5,5 e 7,5) |
 | `ADMIN_API_KEY` / `OTA_HOSTS_PERMITIDOS` | Chave da rota de firmware (vazia = desligada) e hosts permitidos nas URLs dos binários, separados por vírgula (padrão `github.com`) |
+| `OTA_AUTO` / `OTA_AUTO_TENTATIVAS` / `OTA_AUTO_RETENTATIVAS` | OTA automático (padrão `false`), tentativas por versão, alvo e vaso (padrão 2) e verificações extras nas próximas leituras quando o despacho é recusado por `sem_dados` ou `bomba_ligada` (padrão 3) |
 | `OTA_TIMEOUT_S` | Segundos sem andamento para uma atualização (OTA) ser considerada travada (padrão 600) |
 | `LOG_LEVEL` | Nível de log (`DEBUG`, `INFO`, `WARNING`...; valor desconhecido vale `INFO`) |
 
@@ -253,4 +267,10 @@ Todas têm padrão; o `.env.example` traz as principais.
 
 ## Produção (Render)
 
-O `Dockerfile` builda a imagem; falta ajustar o `CMD` para usar a variável `$PORT` do Render em vez de porta fixa e subir a chave do Firebase como Secret File (nunca no build da imagem). Em produção, use o Redis do Render (Key Value), o broker EMQX Cloud no lugar do Mosquitto e uma `API_KEY` aleatória (`openssl rand -hex 24`). O backend deve rodar em **instância única** (duas instâncias gravariam cada leitura em dobro). As demais variáveis de ambiente vão direto no painel do Render.
+- **Porta:** o `Dockerfile` sobe o uvicorn em `0.0.0.0` na porta de `$PORT` (padrão 8000 localmente; o Render define `PORT`).
+- **Saúde:** configure o *Health Check Path* como `/health`. A rota não acessa Firestore, MQTT nem Redis.
+- **Chave do Firebase:** suba como **Secret File** no Render e aponte `FIREBASE_CREDENTIALS_PATH=/etc/secrets/<nome-do-arquivo>`. Nada de segredo entra na imagem (`.dockerignore` exclui `.env`, `serviceAccountKey*.json`, `.git` e `tests`).
+- **Redis e MQTT:** use o Redis do Render (Key Value) em `REDIS_URL` e o EMQX Cloud em `MQTT_HOST`/`MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD` com `MQTT_USE_TLS=true`.
+- **Chaves:** `API_KEY` aleatória (`openssl rand -hex 24`). No Render (variável `RENDER=true`, que o próprio Render define) o backend **recusa subir** com `API_KEY` vazia ou fraca (menos de 12 caracteres ou valores como `1234`) e com `ADMIN_API_KEY` preenchida e fraca. `ADMIN_API_KEY` vazia é aceita: só desliga a rota de firmware. `MQTT_USE_TLS=false` ou broker local em produção geram aviso no log.
+- **Instância única:** duas instâncias gravariam cada leitura em dobro.
+- As demais variáveis de ambiente vão direto no painel do Render (lista completa na seção acima).
