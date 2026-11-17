@@ -1,15 +1,29 @@
-# Segredos: nunca entram na imagem
+# Segredos: nunca entram na imagem (em qualquer pasta do contexto)
 .env
 *.env
 !.env.example
-serviceAccountKey.json
+**/.env
+serviceAccountKey*.json
+**/serviceAccountKey*.json
 firebase-adminsdk*.json
+**/firebase-adminsdk*.json
+*.pem
+*.key
 
-# Lixo de execução (a pasta tests NÃO é excluída: o compose a monta como volume)
+# Controle de versão e editor
+.git
+.gitignore
+.vscode
+.idea
+
+# Testes, caches e lixo de execução (a imagem só precisa de app/ e requirements.txt;
+# no docker-compose a pasta tests é montada como volume, o que não depende do contexto)
+tests
 __pycache__/
+**/__pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
-tests/saida/
-tests/amostras/
