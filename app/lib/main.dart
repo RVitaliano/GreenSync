@@ -204,6 +204,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return status.offline ? Tooltip(message: "Vaso offline", child: botao) : botao;
   }
 
+  /// Linha informativa do OTA (o backend atualiza sozinho; aqui só se mostra o estado):
+  /// "Atualizando o vaso...", "Vaso atualizado (versão X)", etc. Some se não houver o que dizer.
+  Widget _buildEstadoOta(Map<String, dynamic> dados) {
+    final ota = otaDoDispositivo(dados);
+    if (ota == null) return const SizedBox.shrink();
+    final alvo = ota['alvo'] is String ? ota['alvo'] as String : '';
+    final instalada = alvo == 's3' ? dados['fw_s3'] : dados['fw'];
+    final texto = textoOtaDoAlvo(ota, alvo, instalada is String ? instalada : null, DateTime.now());
+    if (texto.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(texto,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.black54)),
+    );
+  }
+
   Widget _buildStatusVaso(StatusVaso status, DateTime? atualizadoEm) {
     final cor = status.atual
         ? Colors.green
@@ -350,8 +367,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ],
                               ),
                             ),
+                          _buildEstadoOta(dados),
                           const SizedBox(height: 8),
-                          
+
                           // NOVO BOTÃO PARA VER O HISTÓRICO
                           ElevatedButton.icon(
                             onPressed: () {
@@ -376,8 +394,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 MaterialPageRoute(builder: (context) => OtaScreen(deviceId: dispositivoSelecionado!)),
                               );
                             },
-                            icon: const Icon(Icons.system_update),
-                            label: const Text("Atualização do Firmware"),
+                            icon: const Icon(Icons.memory),
+                            label: const Text("Versão do Firmware"),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green[600],
                               foregroundColor: Colors.white,

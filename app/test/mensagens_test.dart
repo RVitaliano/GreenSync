@@ -44,36 +44,6 @@ void main() {
     expect(mensagemRegaAgendada(1), 'Regando por 1 segundo…');
   });
 
-  group('mensagemRecusaAtualizar', () {
-    const esperado = {
-      'sem_firmware': 'Nenhuma versão disponível',
-      'sem_dados': 'Não consegui confirmar o estado do vaso agora',
-      'offline': 'O vaso está offline',
-      'bomba_ligada': 'Aguarde a bomba desligar',
-      'versao_igual': 'O vaso já está na versão mais recente',
-      'ota_em_curso': 'Já existe uma atualização em andamento',
-      'firmware_invalido': 'Versão indisponível no momento',
-    };
-    esperado.forEach((codigo, frase) {
-      test(codigo, () => expect(mensagemRecusaAtualizar(codigo), frase));
-    });
-
-    test('código desconhecido ou nulo', () {
-      expect(mensagemRecusaAtualizar('outro'), 'Não foi possível pedir a atualização agora');
-      expect(mensagemRecusaAtualizar(null), 'Não foi possível pedir a atualização agora');
-    });
-  });
-
-  group('mensagemFalhaAtualizar', () {
-    test('incerto e comum', () {
-      expect(mensagemFalhaAtualizar('não tenho certeza se o comando chegou ao vaso'),
-          'O pedido pode ter chegado ao vaso: aguarde alguns minutos antes de tentar de novo');
-      expect(mensagemFalhaAtualizar('não consegui falar com o broker'),
-          'Não foi possível pedir a atualização agora');
-      expect(mensagemFalhaAtualizar(null), 'Não foi possível pedir a atualização agora');
-    });
-  });
-
   group('mensagemErroHttp', () {
     test('códigos conhecidos', () {
       expect(mensagemErroHttp(401), 'Chave de acesso inválida');
@@ -89,35 +59,38 @@ void main() {
     });
   });
 
-  group('progresso do OTA', () {
-    test('estados', () {
-      expect(textoProgressoOta('solicitada', null), 'Pedido enviado');
-      expect(textoProgressoOta('baixando', null), 'Baixando…');
-      expect(textoProgressoOta('aplicando', null), 'Instalando…');
-      expect(textoProgressoOta('ok', null), 'Atualizado com sucesso');
-      expect(textoProgressoOta('revertido', null), 'Voltou à versão anterior');
-      expect(textoProgressoOta('falhou', 'hash'), 'Falhou: arquivo corrompido');
+  group('textoEstadoOta (só informativo)', () {
+    test('baixando e aplicando', () {
+      expect(textoEstadoOta('baixando'), 'Atualizando o vaso...');
+      expect(textoEstadoOta('aplicando'), 'Atualizando o vaso...');
+    });
+
+    test('solicitada (o backend já decidiu atualizar) também mostra "Atualizando"', () {
+      expect(textoEstadoOta('solicitada'), 'Atualizando o vaso...');
+    });
+
+    test('em andamento mas parada além do prazo não mostra nada', () {
+      for (final e in ['solicitada', 'baixando', 'aplicando']) {
+        expect(textoEstadoOta(e, emAndamento: false), '');
+      }
+    });
+
+    test('ok mostra a versão', () {
+      expect(textoEstadoOta('ok', versao: '1.2.0'), 'Vaso atualizado (versão 1.2.0)');
+      expect(textoEstadoOta('ok'), 'Vaso atualizado');
+      expect(textoEstadoOta('ok', versao: ''), 'Vaso atualizado');
+    });
+
+    test('falhou e revertido', () {
+      expect(textoEstadoOta('falhou'), 'A atualização falhou, o vaso continua na versão anterior');
+      expect(textoEstadoOta('falhou', versao: '1.2.0'),
+          'A atualização falhou, o vaso continua na versão anterior');
+      expect(textoEstadoOta('revertido'), 'Vaso voltou para a versão anterior');
     });
 
     test('estado desconhecido ou nulo não mostra nada', () {
-      expect(textoProgressoOta('marciano', null), '');
-      expect(textoProgressoOta(null, null), '');
-    });
-
-    test('tradução dos motivos', () {
-      const esperado = {
-        'hash': 'arquivo corrompido',
-        'download': 'não consegui baixar',
-        'bomba_ligada': 'bomba em uso',
-        'versao_igual': 'já estava nessa versão',
-        'espaco': 'sem espaço no vaso',
-        'host': 'origem não permitida',
-        'desconhecido': 'erro desconhecido',
-      };
-      esperado.forEach((codigo, frase) => expect(traduzirMotivoOta(codigo), frase));
-      expect(traduzirMotivoOta('qualquer_outro'), 'erro desconhecido');
-      expect(traduzirMotivoOta(null), 'erro desconhecido');
-      expect(textoProgressoOta('falhou', null), 'Falhou: erro desconhecido');
+      expect(textoEstadoOta('marciano'), '');
+      expect(textoEstadoOta(null), '');
     });
   });
 

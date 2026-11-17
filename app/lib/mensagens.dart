@@ -41,38 +41,6 @@ String mensagemFalhaRega(String? motivo) {
   return 'Não foi possível regar agora';
 }
 
-// ------------------------------------------------------------ atualização ----
-
-const String msgAtualizacaoSolicitada = 'Pedido de atualização enviado';
-
-String mensagemRecusaAtualizar(String? motivo) {
-  switch (motivo) {
-    case 'sem_firmware':
-      return 'Nenhuma versão disponível';
-    case 'sem_dados':
-      return 'Não consegui confirmar o estado do vaso agora';
-    case 'offline':
-      return 'O vaso está offline';
-    case 'bomba_ligada':
-      return 'Aguarde a bomba desligar';
-    case 'versao_igual':
-      return 'O vaso já está na versão mais recente';
-    case 'ota_em_curso':
-      return 'Já existe uma atualização em andamento';
-    case 'firmware_invalido':
-      return 'Versão indisponível no momento';
-    default:
-      return 'Não foi possível pedir a atualização agora';
-  }
-}
-
-String mensagemFalhaAtualizar(String? motivo) {
-  if (_incerto(motivo)) {
-    return 'O pedido pode ter chegado ao vaso: aguarde alguns minutos antes de tentar de novo';
-  }
-  return 'Não foi possível pedir a atualização agora';
-}
-
 // -------------------------------------------------------------------- http ----
 
 /// Frase para respostas HTTP que não são 200.
@@ -89,43 +57,26 @@ String mensagemErroHttp(int status) {
   }
 }
 
-// ------------------------------------------------------- progresso do OTA ----
+// --------------------------------------------- estado do OTA (só informativo) ----
 
-/// Código curto de erro do vaso (campo `motivo` do mapa `ota`) em português.
-String traduzirMotivoOta(String? codigo) {
-  switch (codigo) {
-    case 'hash':
-      return 'arquivo corrompido';
-    case 'download':
-      return 'não consegui baixar';
-    case 'bomba_ligada':
-      return 'bomba em uso';
-    case 'versao_igual':
-      return 'já estava nessa versão';
-    case 'espaco':
-      return 'sem espaço no vaso';
-    case 'host':
-      return 'origem não permitida';
-    default: // inclui "desconhecido" e qualquer código novo
-      return 'erro desconhecido';
-  }
-}
-
-/// Texto do estado da atualização (`ota.estado`). Vazio se o estado não for conhecido.
-String textoProgressoOta(String? estado, String? motivo) {
+/// Texto do estado da atualização automática (`devices/{id}.ota.estado`), só para mostrar.
+/// O app não pede nem controla atualização: o backend atualiza os vasos sozinho.
+/// [emAndamento] = a atualização ainda está andando (não ficou parada além do prazo);
+/// [versao] = versão instalada, usada no "ok". Vazio se não houver nada a mostrar.
+String textoEstadoOta(String? estado, {bool emAndamento = true, String? versao}) {
   switch (estado) {
     case 'solicitada':
-      return 'Pedido enviado';
     case 'baixando':
-      return 'Baixando…';
     case 'aplicando':
-      return 'Instalando…';
+      return emAndamento ? 'Atualizando o vaso...' : '';
     case 'ok':
-      return 'Atualizado com sucesso';
+      return (versao == null || versao.isEmpty)
+          ? 'Vaso atualizado'
+          : 'Vaso atualizado (versão $versao)';
     case 'falhou':
-      return 'Falhou: ${traduzirMotivoOta(motivo)}';
+      return 'A atualização falhou, o vaso continua na versão anterior';
     case 'revertido':
-      return 'Voltou à versão anterior';
+      return 'Vaso voltou para a versão anterior';
     default:
       return '';
   }

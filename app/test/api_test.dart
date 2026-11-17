@@ -38,19 +38,6 @@ void main() {
       expect((jsonDecode(visto.body) as Map)['duracao_s'], isA<int>());
     });
 
-    test('atualizar: URL, cabeçalhos e corpo', () async {
-      late http.Request visto;
-      final c = MockClient((req) async {
-        visto = req;
-        return json(200, {'resultado': 'solicitada', 'id': 'x', 'motivo': null, 'versao': '2.0.0'});
-      });
-      await api(c).atualizar('vaso-01', 's3');
-      expect(visto.url.toString(), 'http://backend:8000/dispositivos/vaso-01/atualizar');
-      expect(visto.headers['X-API-Key'], 'chave-teste');
-      expect(visto.headers['Content-Type'], startsWith('application/json'));
-      expect(jsonDecode(visto.body), {'alvo': 's3'});
-    });
-
     test('barra no fim da URL não duplica e o id é escapado', () async {
       late http.Request visto;
       final c = MockClient((req) async {
@@ -97,34 +84,6 @@ void main() {
     });
   });
 
-  group('atualizar: respostas 200', () {
-    test('solicitada', () async {
-      final c = MockClient((_) async =>
-          json(200, {'resultado': 'solicitada', 'id': 'abc', 'motivo': null, 'versao': '2.0.0'}));
-      final r = await api(c).atualizar('vaso-01', 'wroom');
-      expect(r.sucesso, isTrue);
-      expect(r.versao, '2.0.0');
-      expect(r.id, 'abc');
-      expect(r.mensagem, msgAtualizacaoSolicitada);
-    });
-
-    test('recusada traduz o motivo', () async {
-      final c = MockClient((_) async =>
-          json(200, {'resultado': 'recusada', 'id': null, 'motivo': 'versao_igual', 'versao': null}));
-      final r = await api(c).atualizar('vaso-01', 'wroom');
-      expect(r.sucesso, isFalse);
-      expect(r.mensagem, 'O vaso já está na versão mais recente');
-    });
-
-    test('falhou', () async {
-      final c = MockClient((_) async =>
-          json(200, {'resultado': 'falhou', 'id': 'abc', 'motivo': 'não consegui falar com o broker', 'versao': '2.0.0'}));
-      final r = await api(c).atualizar('vaso-01', 'wroom');
-      expect(r.resultado, 'falhou');
-      expect(r.mensagem, 'Não foi possível pedir a atualização agora');
-    });
-  });
-
   group('erros', () {
     final casos = {
       401: 'Chave de acesso inválida',
@@ -137,11 +96,10 @@ void main() {
     casos.forEach((status, frase) {
       test('HTTP $status', () async {
         final c = MockClient((_) async => json(status, {'detail': 'x'}));
-        for (final r in [await api(c).regar('vaso-01'), await api(c).atualizar('vaso-01', 'wroom')]) {
-          expect(r.resultado, 'erro');
-          expect(r.sucesso, isFalse);
-          expect(r.mensagem, frase);
-        }
+        final r = await api(c).regar('vaso-01');
+        expect(r.resultado, 'erro');
+        expect(r.sucesso, isFalse);
+        expect(r.mensagem, frase);
       });
     });
 
@@ -157,7 +115,7 @@ void main() {
 
     test('exceção de rede', () async {
       final c = MockClient((_) async => throw http.ClientException('sem rede'));
-      final r = await api(c).atualizar('vaso-01', 's3');
+      final r = await api(c).regar('vaso-01');
       expect(r.resultado, 'erro');
       expect(r.mensagem, msgSemServidor);
     });
@@ -188,13 +146,10 @@ void main() {
       });
       final a = api(c, url: '');
       expect(a.configurado, isFalse);
-      final r1 = await a.regar('vaso-01');
-      final r2 = await a.atualizar('vaso-01', 'wroom');
+      final r = await a.regar('vaso-01');
       expect(chamadas, 0);
-      for (final r in [r1, r2]) {
-        expect(r.resultado, 'erro');
-        expect(r.mensagem, 'Backend não configurado');
-      }
+      expect(r.resultado, 'erro');
+      expect(r.mensagem, 'Backend não configurado');
     });
   });
 }

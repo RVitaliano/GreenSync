@@ -1,4 +1,5 @@
-// Cliente do backend do GreenSync (rega e atualização). Só usa a X-API-Key.
+// Cliente do backend do GreenSync (só a rega manual). Usa apenas a X-API-Key; o app não tem
+// chave de administrador e não pede atualização de firmware (o backend atualiza sozinho).
 import 'dart:async';
 import 'dart:convert';
 
@@ -9,7 +10,7 @@ import 'mensagens.dart';
 
 /// Resultado de uma chamada ao backend, já com a mensagem pronta para o usuário.
 class RespostaApi {
-  /// "agendada", "solicitada", "recusada", "falhou" ou "erro" (falha de rede/HTTP).
+  /// "agendada", "recusada", "falhou" ou "erro" (falha de rede/HTTP).
   final String resultado;
   final String? motivo;
   final String? id;
@@ -24,8 +25,8 @@ class RespostaApi {
     this.versao,
   });
 
-  /// A rega/atualização foi aceita pelo backend.
-  bool get sucesso => resultado == 'agendada' || resultado == 'solicitada';
+  /// A rega foi aceita pelo backend.
+  bool get sucesso => resultado == 'agendada';
 
   factory RespostaApi.erro(String mensagem) => RespostaApi(resultado: 'erro', mensagem: mensagem);
 }
@@ -62,22 +63,6 @@ class ApiGreenSync {
           return mensagemRecusaRega(r.motivo);
         case 'falhou':
           return mensagemFalhaRega(r.motivo);
-        default:
-          return msgSemServidor;
-      }
-    });
-  }
-
-  /// POST /dispositivos/{id}/atualizar com {"alvo": "wroom" | "s3"}.
-  Future<RespostaApi> atualizar(String deviceId, String alvo) {
-    return _post(deviceId, 'atualizar', {'alvo': alvo}, (r) {
-      switch (r.resultado) {
-        case 'solicitada':
-          return msgAtualizacaoSolicitada;
-        case 'recusada':
-          return mensagemRecusaAtualizar(r.motivo);
-        case 'falhou':
-          return mensagemFalhaAtualizar(r.motivo);
         default:
           return msgSemServidor;
       }
