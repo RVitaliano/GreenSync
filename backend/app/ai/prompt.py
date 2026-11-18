@@ -174,11 +174,22 @@ def montar_conversa(historico: list[dict] | None) -> str:
     return "\n".join(linhas)
 
 
+def dica_palavra_de_ativacao() -> str:
+    """Só com a palavra de ativação ligada: ajuda o Gemini a transcrever o nome do assistente igual
+    sempre, para a comparação do backend (app/ai/ativacao.py) acertar."""
+    nome = settings.wake_word.strip()
+    if nome.lower() == "greensync":
+        nome = "GreenSync"
+    return f"O nome do assistente é {nome}; ao transcrever, escreva sempre '{nome}'."
+
+
 def montar_system_prompt(leitura: dict | None, estado: dict, audio: bool = False,
                          historico: list[dict] | None = None) -> str:
     """Prompt completo: regras + tom + dados reais (+ conversa recente) + formato de saída + regras da rega."""
     tom = TONS.get(settings.tom_planta, TONS["planta"])
     formato = AUDIO_EXTRA if audio else TEXTO_EXTRA
+    if audio and settings.wake_word_ativa:
+        formato = f"{formato}\n{dica_palavra_de_ativacao()}"
     conversa = montar_conversa(historico)
     conversa = f"\n\n{conversa}" if conversa else ""
     return f"{BASE}\n\n{tom}\n\n{montar_dados(leitura, estado)}{conversa}\n\n{formato}\n\n{REGA_EXTRA}"

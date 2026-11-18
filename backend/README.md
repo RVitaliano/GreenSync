@@ -110,7 +110,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (905 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (973 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -141,6 +141,14 @@ Cabeçalhos `X-API-Key`, `X-Device-Id` e `Content-Type: audio/wav`. Corpo: WAV 1
 | 502 | Gemini ou voz indisponíveis |
 
 Contrato completo (e o que o firmware do S3 precisa saber, como o timeout de pelo menos 30 s): `docs/Arc42_GreenSync_SDD.md`, Seção 8.4.
+
+**Palavra de ativação (opcional, `WAKE_WORD_ATIVA=true`).** O S3 manda cada fala detectada; o backend só responde se ela **começar** com "GreenSync" (aceita "ei", "oi", "ok", "e aí" antes e erros de transcrição como "green sync" ou "greensinc"; "como está o greensync" não vale). Com a palavra ligada:
+
+- cada fala (ativada ou não) conta no limite de `WAKE_LIMITE_CLIPES_POR_MIN` por minuto, por chave de API (estourou: o mesmo 429 de sempre; sem Redis, ou com ele fora do ar, o limite é ignorado);
+- fala **sem** a palavra: `204` sem corpo e `X-Ativada: nao`. Sem voz, sem rega, sem contar no limite de perguntas, sem gravar no contexto, e o texto da fala não vai para o log;
+- fala **com** a palavra: fluxo normal (a pergunta segue sem a palavra, ex.: "como ela está?"), com `X-Ativada: sim` na resposta.
+
+O Gemini é chamado também para as falas ignoradas (é ele que transcreve). Desligada (padrão), nada muda: sem `204`, sem cabeçalho novo e sem limite novo. O firmware do S3 precisa tratar o `204` como "nada a tocar".
 
 ### Rega por voz
 
@@ -242,6 +250,7 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `FUSO_UTC_H` | Fuso para "às 15h" (Brasília = -3) |
 | `GEMINI_TIMEOUT_S` / `GEMINI_TIMEOUT_AUDIO_S` / `TTS_TIMEOUT_S` | Prazo por chamada ao Gemini, em segundos: texto (padrão 8), áudio (25) e voz (15) |
 | `FIRESTORE_TIMEOUT_S` | Prazo para ler os dados do vaso no Firestore (padrão 5 s); passou disso, a pergunta segue como "sem dados" |
+| `WAKE_WORD_ATIVA` / `WAKE_WORD` / `WAKE_LIMITE_CLIPES_POR_MIN` | Palavra de ativação no `/audio` (padrão desligada), a palavra (padrão `greensync`) e quantas falas por minuto, por chave de API, podem chegar ao Gemini com ela ligada (padrão 20) |
 | `AUDIO_MAX_BYTES` / `AUDIO_MAX_S` | Tamanho (padrão 1000000 bytes) e duração (15 s) máximos do áudio recebido |
 | `TOM_PLANTA` | `planta` (divertido, padrão) ou `informativo` |
 | `SOLO_SECO_ABAIXO` / `SOLO_ENCHARCADO_ACIMA` / `TEMP_MIN` / `TEMP_MAX` / `PH_MIN` / `PH_MAX` | Limiares do estado da planta (padrão 30 %, 80 %, 10 °C, 35 °C, 5,5 e 7,5) |

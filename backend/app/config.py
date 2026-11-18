@@ -43,7 +43,14 @@ class Settings(BaseSettings):
 
     # --- Áudio recebido do S3 / celular (POST /audio) ---
     audio_max_bytes: int = 1_000_000   # ~30 s de WAV 16 kHz mono 16 bits
-    audio_max_s: float = 15.0          # pergunta mais longa que isso é recusada
+    audio_max_s: float = 15.0         # pergunta mais longa que isso é recusada
+
+    # --- Palavra de ativação no POST /audio (desligada por padrão: nada muda) ---
+    # Ligada, o backend só responde se a fala começar com a palavra; senão descarta (204) sem voz.
+    wake_word_ativa: bool = False
+    wake_word: str = "greensync"
+    # Falas por minuto (por chave de API) que podem chegar ao Gemini com a palavra ligada.
+    wake_limite_clipes_por_min: int = 20
 
     # --- Rega por voz e agendamento (REQ-FUNC-011 e REQ-FUNC-012) ---
     # Tópico dos comandos para o vaso; {device_id} é trocado pelo id do dispositivo.
