@@ -89,6 +89,15 @@ const String msgVasoNaoEncontrado =
 const String msgSemRespostaDoVaso = 'Sem resposta do vaso';
 const String msgEnviadoSemConfirmacao = 'Enviado (o vaso não confirma)';
 const String msgErroNaConexao = 'Erro na conexão';
+const String msgPermissaoBluetooth = 'Permita o Bluetooth para configurar o vaso';
+
+/// Confere o SSID e a senha antes de enviar ao vaso. Devolve null se estiver ok, ou a mensagem.
+/// O vaso recebe "ssid,senha", então o SSID não pode ter vírgula; a senha pode.
+String? validarCredenciaisWifi(String ssid, String senha) {
+  if (ssid.isEmpty || senha.isEmpty) return 'Preencha o SSID e a Senha!';
+  if (ssid.contains(',')) return 'O nome da rede não pode ter vírgula';
+  return null;
+}
 
 /// O que uma notificação do vaso (texto UTF-8) significa para a tela.
 class NotificacaoWifi {

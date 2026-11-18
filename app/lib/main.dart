@@ -56,12 +56,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final String serviceUuid = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   final String charUuid = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-  Future<void> pedirPermissoes() async {
-    await [
+  Future<Map<Permission, PermissionStatus>> pedirPermissoes() async {
+    return [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.location,
     ].request();
+  }
+
+  /// true só se o resultado do pedido de permissões mostra Bluetooth (scan ou connect) NÃO concedido.
+  /// Sem resultado (o próprio pedido falhou) devolve false: aí vale a mensagem de erro de sempre.
+  bool _semPermissaoBluetooth(Map<Permission, PermissionStatus>? permissoes) {
+    if (permissoes == null) return false;
+    return !(permissoes[Permission.bluetoothScan]?.isGranted ?? false) ||
+        !(permissoes[Permission.bluetoothConnect]?.isGranted ?? false);
   }
 
   // ------------------------------------------------------------ Wi-Fi (BLE) ----
@@ -96,9 +104,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> enviarWiFiViaBLE() async {
     if (_bleOcupado) return;
-    if (ssidController.text.isEmpty || passwordController.text.isEmpty) {
+    final erroWifi = validarCredenciaisWifi(ssidController.text, passwordController.text);
+    if (erroWifi != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preencha o SSID e a Senha!')),
+        SnackBar(content: Text(erroWifi)),
       );
       return;
     }
@@ -106,12 +115,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _bleOcupado = true;
     BluetoothDevice? vaso;
     StreamSubscription<List<int>>? notificacoes;
+    Map<Permission, PermissionStatus>? permissoes;
     try {
-      await pedirPermissoes();
+      // O resultado NÃO bloqueia o fluxo: só serve para escolher a mensagem se algo der errado.
+      permissoes = await pedirPermissoes();
       _statusBle("Procurando ESP32...");
       vaso = await _procurarVaso();
       if (vaso == null) {
-        _statusBle(msgVasoNaoEncontrado);
+        _statusBle(_semPermissaoBluetooth(permissoes) ? msgPermissaoBluetooth : msgVasoNaoEncontrado);
         return;
       }
 
@@ -161,7 +172,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _statusBle(msgSemRespostaDoVaso);
       }
     } catch (_) {
-      _statusBle(msgErroNaConexao);
+      _statusBle(_semPermissaoBluetooth(permissoes) ? msgPermissaoBluetooth : msgErroNaConexao);
     } finally {
       await notificacoes?.cancel();
       if (vaso != null) {
@@ -472,11 +483,15 @@ class HistoricoScreen extends StatelessWidget {
             .collection('devices')
             .doc(deviceId)
             .collection('historico')
+            .orderBy('timestamp', descending: true)
             .limit(20) 
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text("Não consegui carregar o histórico"));
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text("Nenhum dado histórico encontrado."));
@@ -487,8 +502,9 @@ class HistoricoScreen extends StatelessWidget {
           List<FlSpot> pontosUmidadeSolo = [];
           List<FlSpot> pontosPh = [];
           
-          var docs = snapshot.data!.docs;
-          
+          // A consulta vem do mais novo para o mais antigo; o gráfico vai do mais antigo ao mais novo.
+          var docs = snapshot.data!.docs.reversed.toList();
+
           // Extrai os 4 parâmetros de cada documento
           for (int i = 0; i < docs.length; i++) {
             var dados = docs[i].data() as Map<String, dynamic>;
