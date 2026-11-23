@@ -2,7 +2,7 @@
 
 Cada decisão segue o template de Michael Nygard (Title / Status / Context / Decision / Consequences).
 
-> **Atualizado em 09/11/2026** (ADR-027 e ADR-028; antes, no mesmo dia, revisão do backend: ADR-025 e ADR-026). Antes, **em 03/11/2026** com as ADR-024 a ADR-026 (backend implementado). Atualizações anteriores: 01/10/2026 (ADR-023) e 21/09/2026 (ADR-014 a ADR-022). Decisões antigas que foram revisadas ou substituídas continuam registradas, com o status indicando qual ADR as revisou. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático.
+> **Atualizado em 23/11/2026** (ADR-029 a ADR-033: configuração de Wi-Fi por BLE, atualização OTA, rega somente por comando, palavra de ativação no S3 e redefinição das fases V1 e V2). Antes, **em 09/11/2026** (ADR-027 e ADR-028; antes, no mesmo dia, revisão do backend: ADR-025 e ADR-026). Antes, **em 03/11/2026** com as ADR-024 a ADR-026 (backend implementado). Atualizações anteriores: 01/10/2026 (ADR-023) e 21/09/2026 (ADR-014 a ADR-022). Decisões antigas que foram revisadas ou substituídas continuam registradas, com o status indicando qual ADR as revisou. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo ou de teste prático.
 
 ---
 
@@ -12,7 +12,7 @@ Cada decisão segue o template de Michael Nygard (Title / Status / Context / Dec
 Aceita — revisada pela ADR-016 (o ESP32-S3 passa a cuidar da voz; os sensores ficam no ESP32-WROOM)
 
 ## Context
-O projeto precisa de um microcontrolador capaz de ler múltiplos sensores, acionar atuadores, exibir informações em um display, e — na V2 — processar áudio para o assistente de voz (captura de microfone e reprodução de áudio via I2S).
+O projeto precisa de um microcontrolador capaz de ler múltiplos sensores, acionar atuadores, exibir informações em um display, e, na V2, processar áudio para o assistente de voz (captura de microfone e reprodução de áudio via I2S).
 
 ## Decision
 Usar o ESP32-S3 em vez de variantes anteriores como o ESP32 WROOM-32.
@@ -28,13 +28,13 @@ Fica mais fácil integrar microfone/alto-falante via I2S e contar com mais memó
 Substituída pela ADR-014 (broker EMQX Cloud)
 
 ## Context
-A comunicação entre o dispositivo e a nuvem precisava ser definida. O professor orientador exigiu o uso de MQTT como parte do conteúdo avaliado na disciplina.
+A comunicação entre o dispositivo e a nuvem precisava ser definida. O protocolo precisava ser leve, de publicação e assinatura, adequado a dispositivos pequenos e a redes instáveis. O grupo definiu o MQTT como protocolo de comunicação entre o vaso e a nuvem.
 
 ## Decision
 Usar MQTT como protocolo de publicação dos dados dos sensores, com o HiveMQ Cloud (camada gratuita) como broker.
 
 ## Consequences
-Fica mais fácil atender ao requisito da disciplina e lidar com conexões intermitentes (importante para a V2, com GPRS). Fica mais difícil manter uma arquitetura "sem servidor": passa a ser necessário um backend sempre ativo, assinando o broker — introduzindo um componente de infraestrutura adicional (ver ADR-003) que não existiria em uma integração direta ESP32 → Firebase.
+Fica mais fácil usar um protocolo próprio para IoT e lidar com conexões intermitentes (importante para um dispositivo que cai e volta da rede). Fica mais difícil manter uma arquitetura "sem servidor": passa a ser necessário um backend sempre ativo, assinando o broker — introduzindo um componente de infraestrutura adicional (ver ADR-003) que não existiria em uma integração direta ESP32 → Firebase.
 
 ---
 
@@ -50,7 +50,7 @@ Com a adoção do MQTT (ADR-002), os dados publicados pelo ESP32-S3 precisam ser
 Implementar um backend em Python com FastAPI, responsável por assinar os tópicos MQTT no HiveMQ e gravar os dados recebidos no Firestore. Hospedar esse backend no Render (camada gratuita) durante o desenvolvimento.
 
 ## Consequences
-Fica mais fácil centralizar validação e lógica de negócio (ex.: preparar o contexto para o LLM na V2) em um único lugar controlado pelo grupo. Fica mais difícil manter esse serviço sempre ativo gratuitamente — a camada gratuita do Render "dorme" após inatividade, introduzindo latência na primeira resposta após um período ocioso.
+Fica mais fácil centralizar validação e lógica de negócio (ex.: preparar o contexto para o LLM) em um único lugar controlado pelo grupo. Fica mais difícil manter esse serviço sempre ativo gratuitamente — a camada gratuita do Render "dorme" após inatividade, introduzindo latência na primeira resposta após um período ocioso.
 
 ---
 
@@ -60,13 +60,13 @@ Fica mais fácil centralizar validação e lógica de negócio (ex.: preparar o 
 Aceita
 
 ## Context
-O grupo avaliou usar um módulo de IA local dedicado (inspirado no projeto pessoal do professor orientador, que usa um NPU específico e um modelo pequeno rodando localmente) para o assistente de voz da V2. Optou-se por uma API de LLM em nuvem em vez de processamento local, restando definir qual provedor usar — o critério adotado foi custo zero (camada gratuita) com qualidade adequada em português.
+O grupo avaliou usar um módulo de IA local dedicado (um NPU específico, com um modelo pequeno rodando localmente) para o assistente de voz. Optou-se por uma API de LLM em nuvem em vez de processamento local, restando definir qual provedor usar — o critério adotado foi custo zero (camada gratuita) com qualidade adequada em português.
 
 ## Decision
 Usar a API do **Google Gemini** como LLM do assistente de voz, por oferecer camada gratuita suficiente para o volume de uso do projeto e boa qualidade de resposta em português, eliminando a necessidade de processamento local dedicado.
 
 ## Consequences
-Fica mais fácil implementar com qualidade de resposta melhor e sem depender de hardware adicional específico e de configuração especializada, além de não haver custo operacional para essa parte do projeto (camada gratuita do Gemini). Fica mais difícil manter a filosofia de privacidade/processamento local que orienta o projeto pessoal do professor — decisão consciente do grupo, validada com ele, de que essa não era uma exigência para o projeto da disciplina. Fica também mais difícil trocar de provedor no futuro caso os limites da camada gratuita do Gemini se tornem insuficientes, exigindo adaptar o módulo de orquestração de IA para outra API.
+Fica mais fácil implementar com qualidade de resposta melhor e sem depender de hardware adicional específico e de configuração especializada, além de não haver custo operacional para essa parte do projeto (camada gratuita do Gemini). Fica mais difícil manter a privacidade de um processamento totalmente local — decisão consciente do grupo, que priorizou a qualidade da resposta e a simplicidade do hardware. Fica também mais difícil trocar de provedor no futuro caso os limites da camada gratuita do Gemini se tornem insuficientes, exigindo adaptar o módulo de orquestração de IA para outra API.
 
 ---
 
@@ -169,16 +169,16 @@ Fica mais fácil simplificar o hardware, o firmware e reduzir custo. Fica mais d
 # ADR-011 — Entrega faseada em V1 e V2, com o módulo de IA desenvolvido em paralelo
 
 ## Status
-Aceita — revisada pela ADR-018 (o assistente de voz sobe para a V1; a V2 fica com o GPRS)
+Aceita — as fases foram redefinidas pela ADR-033 (V1 = vaso do WROOM; V2 = voz e display do S3)
 
 ## Context
-O escopo completo do projeto (hardware, irrigação automática, sincronização de dados, assistente de voz integrado, conectividade celular) é amplo para ser entregue de uma vez, e o professor orientador sugeriu uma divisão em etapas. Ao mesmo tempo, o módulo de orquestração de IA (chamadas ao Gemini, montagem de prompt com dados do Firestore) não depende do hardware de voz (microfone, alto-falante, GPRS) para começar a ser construído e testado — só depende do backend e de dados simulados/reais já sincronizados no Firestore.
+O escopo completo do projeto (hardware, irrigação automática, sincronização de dados, assistente de voz integrado) é amplo para ser entregue de uma vez, e dividi-lo em etapas reduz o risco. Ao mesmo tempo, o módulo de orquestração de IA (chamadas ao Gemini, montagem de prompt com dados do Firestore) não depende do hardware de voz (microfone, alto-falante) para começar a ser construído e testado — só depende do backend e de dados simulados/reais já sincronizados no Firestore.
 
 ## Decision
-Dividir a entrega em duas fases: **V1** (hardware, sensores, irrigação automática, sincronização de dados via Wi-Fi/MQTT/Firebase, app básico) e **V2** (integração completa do assistente de voz ao hardware — captura de áudio, reprodução de resposta — e substituição do Wi-Fi por conectividade GPRS). O **módulo de orquestração de IA (LLM via Google Gemini) é desenvolvido em paralelo, já durante a V1**, testado com os dados reais que já estarão sendo gravados no Firestore — mas sem estar conectado ao hardware de voz ainda. A integração desse módulo ao firmware (áudio de entrada/saída) só ocorre na V2.
+Dividir a entrega em duas fases: **V1** (hardware, sensores, irrigação automática, sincronização de dados via Wi-Fi/MQTT/Firebase, app básico) e **V2** (integração completa do assistente de voz ao hardware — captura de áudio e reprodução da resposta). O **módulo de orquestração de IA (LLM via Google Gemini) é desenvolvido em paralelo, já durante a V1**, testado com os dados reais que já estarão sendo gravados no Firestore — mas sem estar conectado ao hardware de voz ainda. A integração desse módulo ao firmware (áudio de entrada/saída) só ocorre na V2.
 
 ## Consequences
-Fica mais fácil priorizar o núcleo funcional do projeto (dados e irrigação) antes de arriscar a complexidade adicional da integração com hardware de voz e da conectividade celular, e ao mesmo tempo adiantar a parte de IA sem depender do cronograma do hardware — reduzindo o risco de a V2 ficar sobrecarregada no fim do projeto. Fica mais difícil demonstrar a experiência completa do produto (assistente de voz falando de verdade) caso a V2 não seja concluída a tempo — risco aceito e mitigado pela priorização da V1 como entrega mínima viável, com a vantagem de que o módulo de IA já estará pronto e testado (via texto/API) quando a V2 começar.
+Fica mais fácil priorizar o núcleo funcional do projeto (dados e irrigação) antes de arriscar a complexidade adicional da integração com hardware de voz, e ao mesmo tempo adiantar a parte de IA sem depender do cronograma do hardware — reduzindo o risco de a V2 ficar sobrecarregada no fim do projeto. Fica mais difícil demonstrar a experiência completa do produto (assistente de voz falando de verdade) caso a V2 não seja concluída a tempo — risco aceito e mitigado pela priorização da V1 como entrega mínima viável, com a vantagem de que o módulo de IA já estará pronto e testado (via texto/API) quando a V2 começar.
 
 ---
 
@@ -207,7 +207,7 @@ O `docker-compose.yml` local passa a incluir o Redis (ADR-015) e a montar a chav
 Aceita — parcialmente revisada pela ADR-015 (o Celery continua fora; o Redis entra)
 
 ## Context
-Ao pesquisar como estruturar o backend, o grupo teve contato com o material do professor orientador, cujo projeto pessoal usa uma stack mais robusta (Django + DRF + Postgres + Redis + Celery + EMQX) para lidar com tarefas em segundo plano e concorrência. Era preciso decidir se o GreenSync deveria seguir uma stack semelhante ou uma abordagem mais simples.
+Ao pesquisar como estruturar o backend, o grupo considerou uma stack mais robusta (Django + DRF + Postgres + Redis + Celery + EMQX) para lidar com tarefas em segundo plano e concorrência. Era preciso decidir se o GreenSync deveria seguir uma stack semelhante ou uma abordagem mais simples.
 
 ## Decision
 Usar apenas os recursos assíncronos nativos do Python (`async`/`await`, FastAPI, `aiomqtt`) para lidar com a concorrência necessária — ouvir o broker MQTT continuamente sem bloquear o restante do backend — em vez de introduzir Celery (execução de tarefas em processos/workers separados) e Redis (fila de mensagens entre esses processos).
@@ -223,13 +223,13 @@ Fica mais fácil manter o backend como um único processo, sem infraestrutura ad
 Aceita — substitui a ADR-002
 
 ## Context
-A ADR-002 escolheu o HiveMQ Cloud como broker MQTT. O grupo já usa o EMQX no laboratório da disciplina (repositório separado) e o projeto de referência do professor orientador também usa EMQX. Como o protocolo é o mesmo, a troca de broker não exige mudar a arquitetura.
+A ADR-002 escolheu o HiveMQ Cloud como broker MQTT. O grupo já tinha experiência com o EMQX, e ele oferece plano gerenciado com TLS e usuários por papel. Como o protocolo é o mesmo, a troca de broker não exige mudar a arquitetura.
 
 ## Decision
 Usar o **EMQX Cloud** (gerenciado) como broker do GreenSync, mantendo tudo o que a ADR-002 definia sobre o protocolo: MQTT sobre TLS (porta 8883), tópicos `greensync/{deviceId}/...`, QoS 1 e Last Will. O desenvolvimento local continua usando o Mosquitto do `docker-compose` (ADR-012).
 
 ## Consequences
-Fica mais fácil alinhar o projeto ao conteúdo da disciplina e reaproveitar o que o grupo já aprendeu no laboratório; no backend, a troca se resume às variáveis `MQTT_HOST`, `MQTT_USERNAME` e `MQTT_PASSWORD`. Fica mais difícil porque o plano gratuito ou serverless do EMQX Cloud e seus limites ainda não foram conferidos **[A DEFINIR]**, o firmware precisa do certificado da CA para validar o TLS, e é preciso criar usuários e permissões no painel. Não se recomenda hospedar um EMQX próprio no Render: consome muita memória e não há confirmação de que o Render aceite conexões MQTT públicas (TCP puro).
+Fica mais fácil reaproveitar o que o grupo já conhecia do EMQX; no backend, a troca se resume às variáveis `MQTT_HOST`, `MQTT_USERNAME` e `MQTT_PASSWORD`. Fica mais difícil porque o plano serverless do EMQX Cloud tem limites de conexões e mensagens que precisam ser acompanhados, o firmware precisa do certificado da CA para validar o TLS, e é preciso criar usuários e permissões no painel. Não se recomenda hospedar um EMQX próprio no Render: consome muita memória e não há confirmação de que o Render aceite conexões MQTT públicas (TCP puro).
 
 ---
 
@@ -239,13 +239,13 @@ Fica mais fácil alinhar o projeto ao conteúdo da disciplina e reaproveitar o q
 Aceita — revisa parcialmente a ADR-013
 
 ## Context
-A ADR-013 rejeitou Celery e Redis, mantendo o backend em um único processo assíncrono. Depois, o professor pediu a presença do Redis. Uma proposta externa de arquitetura sugeria Celery + Redis + `supervisord` em um único container no Render, mas ela tem problemas: o Redis dentro do container do worker não seria alcançável pelo serviço web (que roda em outro container), o `supervisord` e os múltiplos processos pressionam os 512 MB do plano Starter, e uma fila assíncrona obrigaria o S3 a consultar a resposta depois, em vez de recebê-la na mesma requisição.
+A ADR-013 rejeitou Celery e Redis, mantendo o backend em um único processo assíncrono. Depois, o grupo decidiu incluir o Redis para o limite de perguntas e o contexto da conversa. Uma proposta externa de arquitetura sugeria Celery + Redis + `supervisord` em um único container no Render, mas ela tem problemas: o Redis dentro do container do worker não seria alcançável pelo serviço web (que roda em outro container), o `supervisord` e os múltiplos processos pressionam os 512 MB do plano Starter, e uma fila assíncrona obrigaria o S3 a consultar a resposta depois, em vez de recebê-la na mesma requisição.
 
 ## Decision
 **O Redis entra; o Celery continua fora.** O backend segue como processo único (uvicorn) com `async`/`await`. Usos do Redis: contexto curto da conversa por dispositivo (com expiração), limite de perguntas por chave de API e, opcionalmente, cache da última leitura. A chamada ao Gemini roda dentro da requisição; as regas agendadas são tarefas `asyncio` persistidas no Firestore (ADR-021); a detecção de "vaso offline" usa o Last Will do MQTT. A URL do Redis vem da variável de ambiente `REDIS_URL`.
 
 ## Consequences
-Fica mais fácil manter um único processo, gastar pouca memória, atender à exigência do professor e migrar depois para serviços separados, já que a URL do Redis é configurável. Fica mais difícil porque não há fila durável: uma tarefa em andamento se perde num reinício (aceitável, pois o usuário repete a pergunta, e as regas agendadas ficam no Firestore). Se o professor exigir uma fila de verdade, existem alternativas mais leves que o Celery (ex.: `arq` ou `RQ`). A expectativa exata do professor sobre o Redis (fila, cache ou ambos) ainda deve ser confirmada **[A DEFINIR]**.
+Fica mais fácil manter um único processo, gastar pouca memória, dar ao assistente limite de perguntas e contexto, e migrar depois para serviços separados, já que a URL do Redis é configurável. Fica mais difícil porque não há fila durável: uma tarefa em andamento se perde num reinício (aceitável, pois o usuário repete a pergunta, e as regas agendadas ficam no Firestore). Se no futuro for preciso uma fila de verdade, existem alternativas mais leves que o Celery (ex.: `arq` ou `RQ`).
 
 ### Atualização (03/11/2026) — contexto da conversa implementado
 O contexto curto passou a existir: lista `ctx:{deviceId}` no Redis com as últimas **3 trocas**, cada pergunta e resposta cortada em **300 caracteres**, expirando em **5 minutos** sem conversa (`CONTEXTO_TURNOS`, `CONTEXTO_MAX_CHARS`, `CONTEXTO_TTL_S`; `CONTEXTO_TURNOS=0` desliga). Guarda só texto, nunca áudio, e o conteúdo não vai para o log. Se o Redis faltar ou cair, o assistente segue sem contexto (mesma política do limite de perguntas). No prompt, o bloco vem depois dos dados reais e manda usar sempre os dados atuais e ignorar instruções que apareçam na conversa. Guarda-se a frase realmente falada, inclusive a confirmação ou recusa da rega escrita pelo backend (ADR-025). Consequência aceita: um pedido de rega que dependa só do contexto ("e daqui a 1 hora?") não é executado, porque a trava da rega exige a palavra de rega na frase atual.
@@ -268,7 +268,7 @@ Dividir as funções em dois dispositivos do mesmo vaso lógico (`deviceId`, ex.
 No Firestore, continua havendo um único documento por vaso.
 
 ## Consequences
-Fica mais fácil separar os riscos — a irrigação não depende do áudio — e aproveitar os exemplos de código do WROOM. Fica mais difícil manter dois firmwares, dois provisionamentos de Wi-Fi (ADR-022) e uma fonte de 5V que aguente os dois ESPs mais a bomba. Na V2, o GPRS deve ficar só no WROOM, porque o áudio do S3 é pesado para dados móveis. A dúvida sobre em qual dos dois ESPs ficaria o display foi resolvida pela ADR-023: fica no S3, junto com a voz.
+Fica mais fácil separar os riscos — a irrigação não depende do áudio — e aproveitar os exemplos de código do WROOM. Fica mais difícil manter dois firmwares, dois provisionamentos de Wi-Fi (ADR-022) e uma fonte de 5V que aguente os dois ESPs mais a bomba. A dúvida sobre em qual dos dois ESPs ficaria o display foi resolvida pela ADR-023: fica no S3, junto com a voz.
 
 ---
 
@@ -284,25 +284,25 @@ Uma pergunta falada de 5 segundos, em 16 kHz e 16 bits, ocupa cerca de 160 KB, e
 O S3 envia o áudio por **HTTP (POST) direto ao backend**, com o cabeçalho `X-API-Key` e a identificação do dispositivo. O MQTT fica exclusivo do WROOM (leituras, status e comandos). A resposta em áudio volta ao S3 na mesma requisição (**proposta**, a confirmar); essa mesma resposta também carrega o estado da tela (rosto ou dados), ver ADR-023.
 
 ## Consequences
-Fica mais fácil implementar (casa com o FastAPI) e o S3 não precisa conhecer o broker. Fica mais difícil porque o endpoint fica exposto na internet e exige a chave e o limite de perguntas no Redis, o backend precisa estar sempre acordado quando alguém fala (ADR-019), e o formato do áudio (PCM ou WAV, taxa de amostragem), a duração máxima e o formato do campo de estado da tela ainda estão em aberto **[A DEFINIR]**.
+Fica mais fácil implementar (casa com o FastAPI) e o S3 não precisa conhecer o broker. Fica mais difícil porque o endpoint fica exposto na internet e exige a chave e o limite de perguntas no Redis, o backend precisa estar sempre acordado quando alguém fala (ADR-019), e o formato do áudio (PCM ou WAV, taxa de amostragem), a duração máxima e o formato do campo de estado da tela precisaram ser definidos em um contrato à parte (Arc42, Seção 8.4).
 
 ---
 
-# ADR-018 — Assistente de voz entregue na V1; Gemini com Groq de reserva
+# ADR-018 — Assistente de voz com Gemini e Groq de reserva
 
 ## Status
 Aceita — revisa a ADR-011
 
 ## Context
-A ADR-011 previa a integração da IA ao hardware de voz na V2, com o módulo de IA desenvolvido em paralelo na V1. O grupo decidiu que o assistente de voz deve ser entregue já na V1.
+A ADR-011 previa a integração da IA ao hardware de voz na V2, com o módulo de IA desenvolvido em paralelo à V1. O grupo decidiu escolher o provedor de LLM e a forma da entrada de áudio.
 
 ## Decision
-O assistente de voz faz parte da **V1**; a V2 fica com a conectividade GPRS. O LLM é o **Google Gemini** (ADR-004). A entrada de áudio direta no Gemini (sem STT separado) é uma **proposta** a validar na documentação atual e em testes; o TTS ainda precisa ser definido **[A DEFINIR]**. O **Groq** fica como plano B (o que exigiria um STT separado). Toda a integração fica atrás de uma função única, `responder(audio, leitura)`, para trocar de provedor mexendo só no interior dela.
+O assistente de voz é entregue pela **V2** (ADR-033), com o backend pronto desde antes. O LLM é o **Google Gemini** (ADR-004). A entrada de áudio direta no Gemini (sem STT separado) foi validada em testes (ver a atualização abaixo), e o TTS também é do Gemini. O **Groq** fica como plano B (o que exigiria um STT separado). Toda a integração fica atrás de uma função única, `responder(audio, leitura)`, para trocar de provedor mexendo só no interior dela.
 
 A construção segue em camadas: primeiro texto (`POST /perguntar`, testável sem hardware), depois um áudio WAV gravado no celular, e por último o S3 real.
 
 ## Consequences
-Fica mais fácil demonstrar o produto completo na V1 e reduzir o risco validando a IA em texto antes do hardware. Fica mais difícil porque a V1 fica bem maior (dois firmwares, áudio e IA), o prazo precisa ser reconfirmado com o professor **[A DEFINIR]**, a latência da voz precisa ser medida cedo, e as cotas do plano gratuito do Gemini (inclusive para áudio e voz) ainda não foram conferidas.
+Fica mais fácil reduzir o risco validando a IA em texto antes do hardware. Fica mais difícil porque o projeto fica maior (dois firmwares, áudio e IA), a latência da voz precisa ser medida cedo, e as cotas do plano gratuito do Gemini (inclusive para áudio e voz) precisam ser acompanhadas.
 
 ### Atualização (03/11/2026)
 A entrada de áudio direta no Gemini (sem STT separado) foi validada em testes reais com gravações de teste, e o **TTS também é do Gemini** (Interactions API, modelo principal `gemini-3.8-flash-tts` e reserva `gemini-3.8-flash-lite-tts`), então o Groq e um STT separado não foram necessários. A integração ficou atrás de duas funções, `responder` (texto) e `responder_audio` (voz); a voz fica em `ai/voz.py`. A resiliência (modelo reserva, retry, prazos) está na ADR-026. Pendente: testar com voz de celular e ruído de fundo, e medir a latência com o S3 real. Caso típico medido no backend: cerca de 9 s (3 s para entender e responder, 5 a 6 s para a voz).
@@ -318,7 +318,7 @@ Aceita — revisa a ADR-003
 A ADR-003 hospedou o backend no plano gratuito do Render, que "dorme" após inatividade. O assinante MQTT é uma conexão de saída para o broker e não conta como tráfego de entrada, então o serviço dormiria e as leituras se perderiam. Além disso, o assistente de voz precisa de resposta rápida.
 
 ## Decision
-Usar um **serviço web pago e sempre ativo** no Render (plano Starter, cerca de US$ 7 por mês segundo pesquisa de 21/09/2026, com 512 MB de RAM e 0,5 CPU), **instância única** e sem autoscaling, rodando API, assinante MQTT e chamadas de IA em um só processo. O Redis usa o Key Value do Render (plano gratuito ou pago, a conferir **[A DEFINIR]**). O custo é dividido pela equipe. Se a memória apertar (uso próximo de 512 MB, reinícios por falta de memória) ou a voz ficar lenta por disputa de CPU, migra-se para serviços separados, reaproveitando a mesma imagem Docker.
+Usar um **serviço web pago e sempre ativo** no Render (plano Starter, cerca de US$ 7 por mês segundo pesquisa de 21/09/2026, com 512 MB de RAM e 0,5 CPU), **instância única** e sem autoscaling, rodando API, assinante MQTT e chamadas de IA em um só processo. O Redis usa o Key Value do Render. O custo é dividido pela equipe. Se a memória apertar (uso próximo de 512 MB, reinícios por falta de memória) ou a voz ficar lenta por disputa de CPU, migra-se para serviços separados, reaproveitando a mesma imagem Docker.
 
 ## Consequences
 Fica mais fácil manter o assinante sempre ativo, com custo baixo dividido entre três pessoas, e migrar depois sem reescrever código. Fica mais difícil porque o projeto deixa de ser "só camada gratuita" (ver SRS, Seção 3.5.7), os preços do Render mudam e devem ser conferidos antes de contratar, e uma instância única significa nenhuma redundância — mas duas instâncias gravariam cada leitura em dobro.
@@ -344,7 +344,7 @@ Fica mais fácil ter a umidade do ar como dado extra e usar um sensor digital si
 # ADR-021 — Assistente com personalidade e rega por voz, com agenda no Firestore
 
 ## Status
-Aceita — o item 2 foi ajustado pela ADR-025 (saída estruturada no lugar de function calling); os valores de limite foram definidos na ADR-025 e ainda precisam ser calibrados com testes reais
+Aceita — o item 2 foi ajustado pela ADR-025 (saída estruturada no lugar de function calling); os valores de limite foram definidos na ADR-025; o item 5 (irrigação por umidade no firmware) foi revisado pela ADR-031
 
 ## Context
 O SRS previa um assistente apenas consultivo e excluía o controle de atuadores por voz. O grupo quer que o assistente simule a planta (fala em primeira pessoa, informa os dados dos sensores e diz quando precisa de água) e que seja possível pedir "regar daqui 1 minuto" por voz.
@@ -354,17 +354,17 @@ O SRS previa um assistente apenas consultivo e excluía o controle de atuadores 
 2. **Comandos:** a rega é pedida por *function calling*; o Gemini apenas devolve o pedido, e o **backend valida** antes de agir (atraso e duração máximos, intervalo mínimo entre regas, dispositivo online). O Gemini nunca aciona a bomba.
 3. **Agenda no Firestore:** cada rega vira um documento em `devices/{deviceId}/agendamentos`, com status (`pendente`, `executando`, `concluida`, `cancelada`, `expirada`, `falhou`); o backend mantém uma tarefa `asyncio` por agendamento e, ao reiniciar, recarrega os `pendente`. Agendamentos vencidos além de uma tolerância (sugestão: 5 minutos) viram `expirada`. O backend marca `executando` **antes** de publicar o comando, para nunca duplicar a rega.
 4. **Comando ao dispositivo:** publicação em `greensync/{deviceId}/comandos` (MQTT, QoS 1) **(proposta)**; o firmware aplica um tempo máximo de bomba ligada, independente do que receber.
-5. **Irrigação por umidade:** continua no firmware, com histerese, como regra base; voz e agenda são camadas por cima.
+5. **Irrigação por umidade:** inicialmente prevista no firmware, com histerese, como regra base. Foi retirada pela ADR-031: a rega passou a ser feita só por comando validado pelo backend.
 
 ## Consequences
-Fica mais fácil fazer uma demonstração marcante, e o app pode listar e cancelar regas lendo o Firestore em tempo real. A segurança fica em camadas (backend e firmware). Fica mais difícil porque há um novo canal MQTT (trabalho de firmware), o SRS muda (REQ-FUNC-008 deixa de ser só consultivo e surgem REQ-FUNC-011 e REQ-FUNC-012), é preciso definir a regra de conflito entre irrigação automática e agenda, os limites precisam de calibração real, e agendas longas dependem do backend estar no ar. Perder uma rega num travamento é aceitável; duplicá-la não é.
+Fica mais fácil fazer uma demonstração marcante, e o app pode listar e cancelar regas lendo o Firestore em tempo real. A segurança fica em camadas (backend e firmware). Fica mais difícil porque há um novo canal MQTT (trabalho de firmware), o SRS muda (REQ-FUNC-008 deixa de ser só consultivo e surgem REQ-FUNC-011 e REQ-FUNC-012), os limites precisam de calibração real, e agendas longas dependem do backend estar no ar. Perder uma rega num travamento é aceitável; duplicá-la não é.
 
 ---
 
 # ADR-022 — Provisionamento de Wi-Fi por portal de configuração
 
 ## Status
-Aceita
+Substituída pela ADR-029 (configuração por BLE, sem botão físico)
 
 ## Context
 O grupo alterna entre redes (casa e faculdade, ambas WPA2 comum), e o SRS presumia um Wi-Fi já conhecido pelo firmware. Regravar o ESP a cada troca de rede é inviável.
@@ -373,7 +373,7 @@ O grupo alterna entre redes (casa e faculdade, ambas WPA2 comum), e o SRS presum
 Cada ESP abre, quando não consegue conectar, uma rede própria (ex.: `GreenSync-Setup`) com uma página de configuração (por exemplo, com a biblioteca WiFiManager). As credenciais ficam na memória flash, com suporte a mais de uma rede, e um botão físico mantido pressionado apaga a rede salva. Vale para os **dois** ESPs. O hotspot do celular é o plano B. Configurar a rede pelo aplicativo, via Bluetooth (BLE), fica como melhoria futura.
 
 ## Consequences
-Fica mais fácil trocar de rede sem regravar o firmware e sem trabalho no app. Fica mais difícil porque são dois firmwares com o mesmo comportamento, as credenciais ficam gravadas na flash (não usar a senha da rede pessoal em repositório público), e redes de faculdade podem bloquear a porta 8883 do MQTT, o que deve ser testado na rede real **[A DEFINIR]**.
+Fica mais fácil trocar de rede sem regravar o firmware e sem trabalho no app. Fica mais difícil porque são dois firmwares com o mesmo comportamento, as credenciais ficam gravadas na flash (não usar a senha da rede pessoal em repositório público), e redes de faculdade podem bloquear a porta 8883 do MQTT, o que deve ser testado na rede real.
 
 ---
 
@@ -391,14 +391,14 @@ O display OLED fica no **ESP32-S3**, junto com o microfone e o alto-falante — 
 Comportamento: por padrão, o display mostra a carinha (personalidade da planta, ADR-021). Quando o usuário faz uma pergunta por voz, o display troca temporariamente para mostrar os dados do sensor relevantes à pergunta (ex.: temperatura, umidade, pH) e volta à carinha ao final da resposta. Quem decide o que mostrar é o **backend** (módulo `ai/`): a resposta do endpoint de áudio (`POST /audio`, ADR-017) passa a carregar, além do áudio, um campo de estado da tela (ex.: `"tela": "dados"` ou `"tela": "rosto"`). O firmware do S3 só executa a troca — não decide sozinho quando trocar.
 
 ## Consequences
-Fica mais fácil manter a expressão da planta sincronizada com a resposta falada, já que os dois saem do mesmo dispositivo e da mesma requisição HTTP, sem depender de uma segunda mensagem para coordenar os dois ESPs. Fica mais difícil porque o contrato HTTP de áudio (Seção 8.4 do Arc42) precisa ganhar esse campo extra, e o ESP32-WROOM deixa de ter qualquer indicação visual local — se o WROOM ficar offline mas o S3 continuar ligado, o usuário não percebe isso olhando para o vaso (mitigado pelo app já indicar o status offline, REQ-FUNC-007). O formato exato desse campo deve ser definido junto com o restante do contrato de áudio, ainda em aberto na ADR-017 — **[A DEFINIR]**.
+Fica mais fácil manter a expressão da planta sincronizada com a resposta falada, já que os dois saem do mesmo dispositivo e da mesma requisição HTTP, sem depender de uma segunda mensagem para coordenar os dois ESPs. Fica mais difícil porque o contrato HTTP de áudio (Seção 8.4 do Arc42) precisa ganhar esse campo extra, e o ESP32-WROOM deixa de ter qualquer indicação visual local — se o WROOM ficar offline mas o S3 continuar ligado, o usuário não percebe isso olhando para o vaso (mitigado pelo app já indicar o status offline, REQ-FUNC-007). O formato do campo ficou definido no contrato HTTP de áudio (cabeçalhos `X-Tela` e `X-Dados`, Arc42, Seção 8.4).
 
 ---
 
 # ADR-024 — pH simulado na demonstração
 
 ## Status
-Aceita — combinada com o professor orientador
+Aceita
 
 ## Context
 A sonda de pH é o componente de maior risco do projeto: sondas baratas têm calibração inconsistente e se degradam (SRS, Seção 3.3.3; Arc42, Seção 11). O pH alimenta o estado da planta e as respostas do assistente, e o prazo não permite esperar uma sonda confiável para integrar o restante do sistema.
@@ -407,7 +407,7 @@ A sonda de pH é o componente de maior risco do projeto: sondas baratas têm cal
 Na demonstração, o firmware publica um valor de pH **simulado**, entre 6,0 e 7,0, dentro da faixa que o backend considera adequada (5,5 a 7,5). O contrato continua o mesmo (campo `ph` obrigatório, de 0 a 14) e o backend e o assistente tratam o valor como uma leitura normal. A apresentação deve dizer claramente que o pH é simulado.
 
 ## Consequences
-Fica mais fácil integrar e demonstrar o sistema completo (app, histórico e assistente falando do pH) sem depender da sonda, e trocar o valor simulado pela sonda real mexe só no firmware, sem mudar contrato, backend nem app. Fica mais difícil porque o alerta `ph_fora_da_faixa` não dispara na demonstração (a menos que o firmware simule um valor fora da faixa de propósito), o assistente fala do pH como se tivesse sido medido, e existe o risco de ele ser apresentado como real. Marcar o dado como simulado no próprio payload (por exemplo, com um campo extra) é uma melhoria possível **[A DEFINIR]**.
+Fica mais fácil integrar e demonstrar o sistema completo (app, histórico e assistente falando do pH) sem depender da sonda, e trocar o valor simulado pela sonda real mexe só no firmware, sem mudar contrato, backend nem app. Fica mais difícil porque o alerta `ph_fora_da_faixa` não dispara na demonstração (a menos que o firmware simule um valor fora da faixa de propósito), o assistente fala do pH como se tivesse sido medido, e existe o risco de ele ser apresentado como real. Marcar o dado como simulado no próprio payload (por exemplo, com um campo extra) é uma melhoria possível.
 
 ---
 
@@ -428,7 +428,7 @@ A ADR-021 decidiu que o Gemini apenas devolve o pedido de rega e o backend valid
 6. **Comando ao vaso:** `greensync/{deviceId}/comandos`, QoS 1, **sem retain**, payload `{"acao":"regar","duracao_s":5,"id":"<idAgendamento>"}`. O firmware deve ignorar `id` repetido (o QoS 1 pode entregar duas vezes) e manter o próprio tempo máximo de bomba ligada.
 
 ## Consequences
-Fica mais fácil garantir a segurança (várias camadas independentes do modelo, uma única chamada ao LLM, frases sempre verdadeiras) e testar tudo com dados simulados. Fica mais difícil porque o prompt carrega regras de extração de horário que precisam ser validadas com o Gemini real (`tests/manual_rega.py`), a confirmação perde um pouco da personalidade da planta por ser uma frase fixa, o firmware precisa assinar o tópico de comandos e tratar `id` repetido, e a precedência entre a irrigação automática por umidade e a rega agendada continua em aberto **[A DEFINIR]**. "Concluída" no backend quer dizer "comando publicado": só o firmware sabe se a bomba girou.
+Fica mais fácil garantir a segurança (várias camadas independentes do modelo, uma única chamada ao LLM, frases sempre verdadeiras) e testar tudo com dados simulados. Fica mais difícil porque o prompt carrega regras de extração de horário que precisam ser validadas com o Gemini real (`tests/manual_rega.py`), a confirmação perde um pouco da personalidade da planta por ser uma frase fixa, o firmware precisa assinar o tópico de comandos e tratar `id` repetido, (a precedência entre irrigação automática e rega agendada deixou de existir com a ADR-031). "Concluída" no backend quer dizer "comando publicado": só o firmware sabe se a bomba girou.
 
 ### Atualização (09/11/2026) — revisão do backend
 1. **Trava também no cancelamento.** Cancelar uma rega marcada exige uma palavra de cancelamento na fala da pessoa (cancelar, desmarcar, desfazer, esquecer, "não precisa", "deixa pra lá"), como a rega exige uma palavra de rega. Antes, o modelo errando podia desmarcar uma rega. A trava da rega ficou mais justa: "regular", "regulamento" e "regada" não valem.
@@ -486,7 +486,7 @@ Fica mais fácil confiar na fala quando o assunto é pH, e o texto do prompt é 
 Aceita
 
 ## Context
-O grupo tem três frentes e só uma (o backend) tinha código testável sem hardware. A suíte do backend precisa rodar sem gastar cota do Gemini, sem o Firestore real e sem internet, e as travas de segurança da rega (palavra do pedido, intervalo mínimo, publicação incerta) não podem depender da sorte do modelo. Também foi pedido, na disciplina, um plano de testes formal.
+O grupo tem três frentes e só uma (o backend) tinha código testável sem hardware. A suíte do backend precisa rodar sem gastar cota do Gemini, sem o Firestore real e sem internet, e as travas de segurança da rega (palavra do pedido, intervalo mínimo, publicação incerta) não podem depender da sorte do modelo. O grupo adotou também um plano de testes formal.
 
 ## Decision
 1. **Testes automatizados com fakes** (pytest), rodando só dentro do Docker, independentes do `.env`, para cada trava do backend.
@@ -496,3 +496,87 @@ O grupo tem três frentes e só uma (o backend) tinha código testável sem hard
 
 ## Consequences
 Fica mais fácil mudar o backend com segurança (448 execuções em poucos segundos) e provar cada trava. Fica mais difícil porque uma suíte verde não prova a integração real: o roteiro manual e os testes em grupo com o vaso continuam obrigatórios, e o plano precisa ser mantido junto com o SRS para não ficar desatualizado.
+
+---
+
+# ADR-029 — Configuração de Wi-Fi por Bluetooth (BLE), sem botão físico
+
+## Status
+Aceita — substitui a ADR-022
+
+## Context
+A ADR-022 previa um portal de configuração aberto pelo próprio ESP e um botão físico para apagar a rede salva. A case do vaso não terá botão, e o aplicativo já existe como ponto de contato com o usuário. Um portal exige trocar a rede do celular e digitar a senha em uma página do navegador, o que atrapalha a experiência.
+
+## Decision
+O ESP32-WROOM anuncia o serviço BLE **`GreenSync_BLE`** quando **não há rede salva** ou depois de **4 falhas seguidas** de conexão. O app envia `ssid,senha` em uma característica GATT e recebe notificações do andamento (`conectando`, `ok` ou `erro:senha`, `erro:rede`, `erro:timeout`). As credenciais só são gravadas na memória (NVS) **depois** de uma conexão bem-sucedida, então uma senha errada nunca apaga a rede que já funcionava. Não há botão físico: o BLE reabre sozinho quando a rede falha. O S3 receberá a rede pelo WROOM, por uma ponte UART (em desenvolvimento).
+
+## Consequences
+Fica mais fácil trocar de rede sem regravar o firmware, sem botão e sem sair do app. Fica mais difícil porque a senha trafega **sem criptografia** pelo BLE (aceito, pelo alcance curto e pela janela curta de configuração; o pareamento com PIN é uma melhoria possível), o app precisa das permissões de Bluetooth do Android, e o BLE só abre em situação de falha: trocar de rede com a antiga ainda funcionando exige apagar a rede salva por outro meio ou esperar as falhas.
+
+---
+
+# ADR-030 — Atualização de firmware pela rede (OTA) com GitHub Releases e rollback
+
+## Status
+Aceita
+
+## Context
+Com o vaso montado na case, gravar o firmware por USB a cada mudança é inviável. Uma atualização ruim, no entanto, não pode deixar o vaso sem funcionar nem permitir que alguém envie um binário qualquer.
+
+## Decision
+- O binário de cada versão é publicado em um *release* do GitHub (tag `firmware-{alvo}-vX.Y.Z`), e uma GitHub Action registra a versão, a URL e o **SHA-256** no backend (`PUT /firmware/{alvo}`, protegido por `X-Admin-Key`), no documento `firmware/{alvo}` do Firestore (com `anterior` e `bloqueadas`).
+- O backend manda o comando `atualizar` por MQTT (rota `/dispositivos/{id}/atualizar`, ou automaticamente com `OTA_AUTO`, que só **sobe** de versão pela regra semver e tenta no máximo 2 vezes por versão). Versão, URL e hash vêm sempre do registro, nunca do app.
+- O vaso só baixa por **HTTPS** de `github.com`, calcula o SHA-256 enquanto grava, recusa a atualização com a **bomba ligada** e grava na partição inativa (dois slots de OTA).
+- O firmware novo precisa se **confirmar** (conectar ao MQTT); se não o fizer em 5 minutos, ou reiniciar mais de 3 vezes sem se confirmar, o vaso volta sozinho à versão anterior (*rollback*).
+- O progresso volta em `greensync/{deviceId}/ota` (`baixando`, `aplicando`, `ok`, `falhou`, `revertido`). A rota `/reverter` (administração) e `/firmware/{alvo}/retirar` desfazem uma versão ruim e a bloqueiam.
+
+## Consequences
+Fica mais fácil corrigir e evoluir o firmware sem abrir a case, com proteção contra binário corrompido (hash), origem indevida (host permitido) e atualização que não funciona (rollback). Fica mais difícil porque há um fluxo de publicação a seguir (a versão do registro precisa ser igual à `FW_VERSION` compilada no mesmo `.bin`), a tabela de partições com dois slots reduz o espaço livre, a validação do certificado do download ainda depende da CA configurada no firmware (`OTA_TLS_INSEGURO`), e o OTA do S3 fica para depois.
+
+---
+
+# ADR-031 — Rega somente por comando; sem irrigação automática no firmware
+
+## Status
+Aceita — revisa o item 5 da ADR-021 e o REQ-FUNC-002
+
+## Context
+A irrigação automática por umidade no firmware convivia mal com a rega por voz e por agenda (era preciso definir qual vence), dependia de uma calibração difícil do YL-69 (sensor resistivo, que corrói e deriva) e podia regar sem ninguém ter pedido. O objetivo do produto passou a ser agendar e mandar regar na hora, com o backend como único ponto de decisão.
+
+## Decision
+O firmware **não decide regar sozinho**. A bomba só liga com um comando `regar` validado pelo backend (botão do app, pedido por voz ou agenda). O firmware mantém as defesas próprias: tempo máximo de bomba ligada (15 s), `id` repetido ignorado e recusa de atualização com a bomba ligada. O backend aplica as regras da ADR-025 (intervalo mínimo, duração máxima, vaso online, solo não encharcado). Na demonstração, o intervalo mínimo é de 30 s (`REGA_INTERVALO_MIN_S=30`).
+
+## Consequences
+Fica mais fácil raciocinar sobre a atuação: há um único caminho até a bomba, sem conflito de precedência, e uma deriva do sensor não causa rega. Fica mais difícil porque a planta deixa de ser regada se o backend, o broker ou a rede estiverem fora do ar (a premissa de "não depender da nuvem" da ADR-021 deixa de valer), e o usuário precisa agendar ou pedir as regas. Uma regra local com histerese pode voltar no futuro, depois de calibrar o sensor no solo real.
+
+---
+
+# ADR-032 — Palavra de ativação detectada no próprio ESP32-S3 ("Hi ESP")
+
+## Status
+Aceita — implementação pendente (será feita depois do áudio e do display)
+
+## Context
+A palavra de ativação no backend (`WAKE_WORD_ATIVA`, ex.: "GreenSync") exige enviar toda fala detectada ao Gemini para descobrir se havia a palavra, o que gasta cota, aumenta a latência e leva à nuvem áudios que não eram para o assistente.
+
+## Decision
+O S3 detecta a palavra de ativação **localmente**, com o ESP-SR (WakeNet), usando a frase **"Hi ESP"**. Só depois da detecção ele captura a pergunta e a envia ao backend (`POST /audio`). A opção do backend continua disponível, desligada por padrão, como camada extra.
+
+## Consequences
+Fica mais fácil proteger a privacidade e a cota do Gemini, porque o áudio só sai do vaso depois da palavra. Fica mais difícil porque a frase é fixa e em inglês (pode haver dificuldade com sotaque), o modelo exige **PSRAM** (a placa tem 8 MB) e uma partição própria para o modelo, e a detecção compete com o áudio e o Wi-Fi pelos recursos do S3. A ativação é a última etapa do firmware do S3; enquanto isso, um botão ou o envio direto serve para os testes.
+
+---
+
+# ADR-033 — Fases do projeto: V1 é o vaso do WROOM, V2 é a voz do S3; sem GPRS
+
+## Status
+Aceita — revisa as ADR-011 e ADR-018
+
+## Context
+A divisão original previa o assistente de voz na V1 e a conectividade celular (GPRS) na V2. Na prática, o vaso com sensores, bomba, MQTT, app, BLE e OTA ficou completo no ESP32-WROOM, e o ESP32-S3 (voz e display) é uma frente à parte, com hardware próprio a montar e testar. A conectividade GPRS saiu do escopo.
+
+## Decision
+A **V1** é o vaso do ESP32-WROOM: sensores, bomba por comando, sincronização de dados, app, configuração de Wi-Fi por BLE e OTA. A **V2** é o ESP32-S3: voz (microfone, alto-falante, palavra de ativação "Hi ESP") e display, usando o assistente que o backend já oferece. O projeto não terá conectividade GPRS: o vaso depende de Wi-Fi.
+
+## Consequences
+Fica mais fácil entregar e demonstrar a V1 sozinha, sem depender do hardware de voz, e o backend de voz já está pronto para a V2. Fica mais difícil usar o vaso onde não há Wi-Fi, o que passa a ser uma limitação conhecida (o hotspot do celular serve de alternativa).

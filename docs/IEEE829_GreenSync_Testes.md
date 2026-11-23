@@ -1,37 +1,37 @@
 # Plano de Testes — GreenSync (formato IEEE 829)
 
-> Plano mestre enxuto. Não repete o SRS: aponta para ele. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo ou do professor.
+> Plano mestre enxuto. Não repete o SRS: aponta para ele. Itens marcados **[A DEFINIR]** dependem de confirmação do grupo.
 
 ## 1. Identificador do Plano
 
 | Campo | Valor |
 |---|---|
 | Identificador | PT-GREENSYNC-001 (plano mestre) |
-| Versão | 0.1 — 09/11/2026 |
+| Versão | 0.2 — 23/11/2026 |
 | Autor | Grupo GreenSync (frente de backend) |
-| Software relacionado | SRS v0.7, Arc42 v0.7, ADR-001 a ADR-028 |
+| Software relacionado | SRS v0.8, Arc42 v0.8, ADR-001 a ADR-033 |
 
-Histórico: 0.1 (09/11/2026) — primeira versão, com o backend já testado e o firmware, o app e a integração ainda por testar.
+Histórico: 0.1 (09/11/2026) — primeira versão, com o backend já testado e o firmware, o app e a integração ainda por testar. 0.2 (23/11/2026) — firmware do WROOM testado em bancada (sensores reais, bomba, BLE, OTA); rega somente por comando; novos requisitos REQ-FUNC-017 e REQ-FUNC-018; suíte com 973 testes.
 
 ## 2. Referências
 
-- SRS — Requisitos — GreenSync (v0.7): requisitos REQ-FUNC-001 a REQ-FUNC-016 e a tabela de verificação (Seção 4).
-- Arc42 — SDD — GreenSync (v0.7): contratos MQTT (8.1), Firestore (8.2), HTTP de áudio (8.4), limites da rega (8.5) e estratégia de testes (8.10).
+- SRS — Requisitos — GreenSync (v0.8): requisitos REQ-FUNC-001 a REQ-FUNC-018 (o REQ-FUNC-010 foi retirado) e a tabela de verificação (Seção 4).
+- Arc42 — SDD — GreenSync (v0.8): contratos MQTT (8.1), Firestore (8.2), HTTP de áudio (8.4), limites da rega (8.5), estratégia de testes (8.10), OTA (8.11) e BLE (8.12).
 - ADR — Decisões — GreenSync: em especial ADR-024 (pH simulado), ADR-025 (rega), ADR-026 (falhas), ADR-027 (pH exato) e ADR-028 (estratégia de testes).
 - `backend/README.md`: como rodar a suíte automatizada.
 
 ## 3. Introdução
 
-Este plano define como o GreenSync é testado até a demonstração da V1: o backend (já testado), o firmware dos dois ESPs, o aplicativo e a integração de ponta a ponta. O grupo tem três pessoas e uma só frente (backend) com código testável sem hardware, então o plano separa o que se prova com testes automatizados do que só se prova em teste conjunto com o vaso real. A V2 (GPRS) fica fora.
+Este plano define como o GreenSync é testado até a demonstração: o backend (já testado), o vaso do WROOM (V1, testado em bancada), a voz e o display do S3 (V2, em testes de hardware), o aplicativo e a integração de ponta a ponta. O grupo tem três pessoas e uma só frente (backend) com código testável sem hardware, então o plano separa o que se prova com testes automatizados do que só se prova em teste conjunto com o vaso real. 
 
 ## 4. Itens de Teste
 
 | Item | Versão / forma | Nível |
 |---|---|---|
 | Backend (FastAPI, MQTT, Firestore, Redis, IA, agendador) | Branch `main` do repositório, imagem Docker | Unidade, integração e sistema |
-| Firmware ESP32-WROOM (sensores, bomba, MQTT) | A definir pela frente de firmware | Unidade (bancada) e integração |
-| Firmware ESP32-S3 (voz, display, HTTP) | A definir pela frente de firmware | Unidade (bancada) e integração |
-| Aplicativo Flutter | A definir pela frente do app | Sistema e aceitação |
+| Firmware ESP32-WROOM (sensores, bomba, MQTT, BLE, OTA) | Versão 2.1.0 (tag `firmware-wroom-vX.Y.Z`) | Unidade (bancada) e integração |
+| Firmware ESP32-S3 (voz, display, HTTP) | Em desenvolvimento, testado por módulo (display, microfone, alto-falante) | Unidade (bancada) e integração |
+| Aplicativo Flutter | Branch `main` do repositório, em aparelho Android | Sistema e aceitação |
 | Serviços externos (EMQX Cloud, Firebase, Gemini, Render) | Contas e planos do grupo | Integração |
 
 ## 5. Riscos de Software
@@ -41,11 +41,13 @@ Este plano define como o GreenSync é testado até a demonstração da V1: o bac
 | Rega indevida ou em excesso | Atuação física: bomba ligada sem pedido, em dobro ou por tempo demais | Alto (segurança do vaso) |
 | Sonda de pH pouco confiável | Maior risco técnico do projeto; o pH da demonstração é simulado (ADR-024) | Alto |
 | Modelo de linguagem imprevisível | O Gemini pode arredondar o pH, errar horários ou estourar o prazo (503) | Médio |
-| Contratos não validados com o firmware | O backend implementa MQTT e HTTP de áudio, mas o firmware ainda não confirmou | Alto |
+| Contrato de áudio não validado com o S3 | O contrato MQTT está validado com o WROOM; o cliente HTTP de áudio do S3 ainda não | Alto |
+| Atualização de firmware ruim | Um OTA com binário defeituoso pode deixar o vaso fora do ar | Alto |
+| Hardware do S3 instável | Montagem em protoboard, com maus contatos | Médio |
 | Rede da faculdade bloquear a porta 8883 | MQTT/TLS pode não conectar | Alto |
 | Testes com fakes não provam o mundo real | A suíte automatizada não usa Gemini, Firestore, Redis nem broker reais | Médio |
 | Credenciais vazarem | `.env` e chave do Firebase | Alto |
-| Requisitos ainda **[A DEFINIR]** no SRS | Ex.: tempos de resposta, precedência entre rega automática e agendada | Médio |
+| Segurança ainda parcial | TLS sem validação de certificado na bancada, senha do Wi-Fi sem criptografia no BLE, regras do Firestore pendentes | Médio |
 
 ## 6. Funcionalidades a Testar (visão do usuário)
 
@@ -53,7 +55,8 @@ Risco: A = alto, M = médio, B = baixo. Detalhes e critérios de cada requisito 
 
 | Funcionalidade | Requisito | Risco |
 |---|---|---|
-| Irrigação automática com histerese e tempo máximo da bomba | REQ-FUNC-002 | A |
+| Execução segura da rega no firmware (tempo máximo, `id` repetido ignorado, sem rega sem comando) | REQ-FUNC-002 | A |
+| Atualização OTA com SHA-256 e rollback | REQ-FUNC-017 | A |
 | Rega por voz ou texto, com limites | REQ-FUNC-011 | A |
 | Agendamento persistente, sem duplicar | REQ-FUNC-012 | A |
 | Endpoint de áudio autenticado | REQ-FUNC-014 | A |
@@ -62,20 +65,20 @@ Risco: A = alto, M = médio, B = baixo. Detalhes e critérios de cada requisito 
 | Indicação de vaso offline e dado velho | REQ-FUNC-007 | M |
 | Assistente com personalidade, dados reais e pH exato | REQ-FUNC-008 | M |
 | Limite de perguntas por chave | REQ-FUNC-015 | M |
-| Configuração de Wi-Fi sem regravar | REQ-FUNC-013 | M |
+| Configuração de Wi-Fi por BLE, sem regravar | REQ-FUNC-013 | M |
 | Dados e histórico no app | REQ-FUNC-005, 006 | B |
 | Mute do microfone | REQ-FUNC-009 | B |
 | Display (carinha e dados) | REQ-FUNC-016 | B |
+| Palavra de ativação "Hi ESP" | REQ-FUNC-018 | B |
 
 ## 7. Funcionalidades que Não Serão Testadas
 
 | Item | Motivo |
 |---|---|
-| Conectividade GPRS (REQ-FUNC-010) | Pertence à V2 |
 | Carga e desempenho com muitos vasos | Fora do escopo: um vaso, poucas leituras por minuto |
-| Acessibilidade e padrão visual do app | Não definidos formalmente pelo grupo |
+| Acessibilidade e padrão visual do app | Sem requisito formal; segue o Material Design |
 | Privacidade formal (LGPD) | Baixo risco; seguem-se só as boas práticas do SRS 3.3.2 |
-| Provisionamento por Bluetooth e atualização OTA | Melhorias futuras, fora da V1 |
+| Pareamento do BLE com PIN | Melhoria futura; hoje a senha trafega sem criptografia em curta distância |
 | Qualidade da voz sintetizada do Gemini | Depende do provedor; avaliada só por escuta nos testes manuais |
 
 ## 8. Abordagem
@@ -93,7 +96,7 @@ Risco: A = alto, M = médio, B = baixo. Detalhes e critérios de cada requisito 
 - A suíte completa roda antes de cada Pull Request; o PR só entra na `main` com a suíte verde.
 - Toda trava de segurança corrigida passa pela **prova por reversão**: desfaz-se a correção, confirma-se que um teste falha e restaura-se.
 - Os testes não alteram os existentes só para passar.
-- Métricas coletadas: testes executados e aprovados (hoje 448 e 448), defeitos achados por nível e itens do roteiro manual aprovados.
+- Métricas coletadas: testes executados e aprovados (hoje 973 e 973), defeitos achados por nível e itens do roteiro manual aprovados.
 - Configurações testadas: local (Docker: backend, Mosquitto, Redis) e nuvem (EMQX Cloud e Render). Hardware: um vaso, dois ESPs.
 - Mudança de contrato (tópico, JSON, Firestore, HTTP) é avisada às três frentes e repete os testes dos dois lados.
 
@@ -121,16 +124,16 @@ Risco: A = alto, M = médio, B = baixo. Detalhes e critérios de cada requisito 
 - A suíte automatizada (`backend/tests/`) e os scripts manuais (`tests/manual_*.py`).
 - Simuladores: fakes dos testes, `mosquitto_pub` como "vaso" de mentira, WAVs de teste.
 - Relatórios de execução (saída do pytest e do roteiro manual) e logs do backend (`docker compose logs backend`).
-- Registro de defeitos: lista simples no repositório (Issues) **[A DEFINIR]**.
+- Registro de defeitos: GitHub Issues do repositório.
 
 ## 12. Tarefas de Teste Restantes
 
 - Executar o roteiro manual do backend em grupo e registrar os resultados.
-- Testar o firmware: assinatura de `comandos`, `id` repetido ignorado, timer da bomba, Last Will, TLS na 8883 e provisionamento de Wi-Fi.
-- Testar o display e o cliente HTTP de áudio do S3 (timeout de pelo menos 30 s, memória para o WAV de resposta).
+- Concluir o teste do firmware do WROOM: o rollback automático do OTA, a validação do certificado TLS e a calibração do YL-69 com solo real (já testados: `comandos`, `id` repetido ignorado, timer da bomba, Last Will, TLS na 8883, BLE e OTA com SHA-256).
+- Testar o display, o microfone, o alto-falante e o cliente HTTP de áudio do S3 (timeout de pelo menos 30 s, memória para o WAV de resposta), e por último a palavra de ativação.
 - Testar o app: dados em tempo real, histórico, vaso offline e agendamentos.
 - Testar voz de celular e ruído de fundo com o Gemini real.
-- Testar o deploy no Render (`$PORT`, healthcheck, variáveis, Mosquitto com autenticação) na branch de deploy.
+- Conferir as variáveis do Render na demonstração (`REGA_INTERVALO_MIN_S=30`).
 - Teste de ponta a ponta e ensaio da demonstração.
 
 ## 13. Necessidades de Ambiente
@@ -154,7 +157,7 @@ Todos precisam saber subir o ambiente com Docker, usar `mosquitto_pub`/`mosquitt
 | Testes de bancada e de integração do firmware (WROOM e S3) | Hardware/firmware |
 | Testes do app | App/design |
 | Integração e ensaio da demonstração | Os três, juntos |
-| Decisão de seguir (go/no-go) para a demonstração | Os três, com o professor orientador quando necessário |
+| Decisão de seguir (go/no-go) para a demonstração | Os três |
 | Aprovação de mudança de contrato | Os três |
 
 ## 16. Cronograma
@@ -165,9 +168,10 @@ Datas relativas aos marcos de desenvolvimento, para o teste não ser culpado por
 |---|---|
 | Backend na `main` (feito) | Roteiro manual do backend (assim que o grupo se reunir) |
 | Firmware publicando no formato combinado | Integração do vaso |
-| Deploy do backend no Render (previsto para o próximo sábado, 14/11/2026, a confirmar) | Teste do backend em nuvem e do cliente do S3 |
+| Deploy do backend no Render (feito) | Teste do backend em nuvem e do cliente do S3 |
+| Release do firmware do WROOM publicada | Teste do OTA no vaso real |
 | App lendo o Firestore | Ponta a ponta |
-| Prazo da V1 **[A DEFINIR]** com o professor | Ensaio da demonstração, uma semana antes (sugestão) |
+| Demonstração (23/11/2026) | Ensaio da demonstração, antes da data |
 
 Se um marco atrasar, o teste que depende dele começa no dia seguinte à entrega, e não em data fixa.
 
@@ -175,22 +179,13 @@ Se um marco atrasar, o teste que depende dele começa no dia seguinte à entrega
 
 | Risco | O que fazer |
 |---|---|
-| Firmware ou app atrasam | Continuar com dados simulados (`mosquitto_pub`, Firestore manual); a demonstração prioriza a V1 mínima |
+| Firmware ou app atrasam | Continuar com dados simulados (`mosquitto_pub`, Firestore manual); a demonstração prioriza a V1 (o vaso do WROOM) |
 | Falta de tempo para o teste de ponta a ponta | Cortar itens de risco baixo (display, mute) e manter os de risco alto (bomba, rega, offline) |
 | Cota do Gemini acaba | Usar o modelo reserva, reduzir os scripts manuais e testar o resto com fakes |
 | Hardware quebra (bomba, sonda) | Ter peça reserva; o pH já é simulado (ADR-024) |
 | Mudança de requisito perto da entrega | Atualizar o SRS e os contratos antes e repetir os testes dos dois lados |
 
-## 18. Aprovações
-
-| Papel | Nome | Data |
-|---|---|---|
-| Frente de backend | **[A DEFINIR]** | |
-| Frente de firmware | **[A DEFINIR]** | |
-| Frente do app | **[A DEFINIR]** | |
-| Professor orientador | **[A DEFINIR]** | |
-
-## 19. Glossário
+## 18. Glossário
 
 | Termo | Definição |
 |---|---|

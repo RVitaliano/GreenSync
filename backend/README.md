@@ -150,9 +150,11 @@ Contrato completo (e o que o firmware do S3 precisa saber, como o timeout de pel
 
 O Gemini é chamado também para as falas ignoradas (é ele que transcreve). Desligada (padrão), nada muda: sem `204`, sem cabeçalho novo e sem limite novo. O firmware do S3 precisa tratar o `204` como "nada a tocar".
 
+> A palavra de ativação principal do vaso é detectada no próprio S3 ("Hi ESP", ESP-SR), antes de enviar o áudio. Esta opção do backend continua disponível como camada extra e fica desligada por padrão.
+
 ### Rega por voz
 
-Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s; a demonstração usa 15 s no `.env`), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Ver Seção 8.5 do Arc42.
+Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s; a demonstração usa 15 s no `.env`), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Na demonstração, o `.env` usa duração de 15 s e `REGA_INTERVALO_MIN_S=30`, para repetir a rega na frente do público. Ver Seção 8.5 do Arc42.
 
 ### `POST /dispositivos/{device_id}/regar` (botão "Regar agora" do app)
 
@@ -269,10 +271,12 @@ Todas têm padrão; o `.env.example` traz as principais.
 | Limite de perguntas no Redis (429 + `Retry-After`) | Implementado |
 | `POST /perguntar` e `POST /audio` (Gemini + voz) | Implementado |
 | Rega por voz, agendamento persistente e comando MQTT | Implementado (execução no horário com o vaso real ainda não testada) |
-| Teste do Last Will com o firmware | Pendente |
+| Last Will (`offline` no Firestore quando o vaso cai) | Implementado |
 | Contexto curto da conversa no Redis (últimas 3 trocas, 5 min) | Implementado |
-| Deploy no Render (`$PORT` dinâmico, chave do Firebase como Secret File, EMQX no lugar do Mosquitto) | Pendente |
-| Teste de ponta a ponta com firmware e app | Pendente |
+| Deploy no Render (`$PORT` dinâmico, chave do Firebase como Secret File, EMQX no lugar do Mosquitto) | Implementado (produção) |
+| OTA (registro de firmware, `/atualizar`, `/reverter`, OTA automático) | Implementado e testado com o WROOM |
+| Teste de ponta a ponta com o WROOM e o backend | Concluído |
+| Teste de ponta a ponta com o S3 e o app | Em andamento |
 
 ## Produção (Render)
 
