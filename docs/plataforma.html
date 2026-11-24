@@ -8,56 +8,85 @@
 <body>
     <header class="cabecalho-amarelo">
         <div class="linha-superior">
-            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <img src="logo-planta.jpeg" alt="Logo GreenSync" class="logo">
             <div class="titulo-branco">PROJETO GREENSYNC</div>
         </div>
         <nav class="menu-branco">
             <a href="index.html">Home</a>
-            <a href="plataforma.html">Plataforma</a>
+            <a href="plataforma.html" class="ativo">Plataforma</a>
             <a href="dispositivo.html">Dispositivo</a>
             <a href="aplicativo.html">Aplicativo</a>
+            <a href="tecnologias.html">Tecnologias</a>
         </nav>
     </header>
 
     <main class="conteudo">
         <section>
             <h2>Arquitetura do Sistema</h2>
-            <p>O backend atua como a ponte entre o vaso inteligente e o aplicativo móvel. Toda a lógica de validação, persistência, regras de IA e agendamento de regas fica centralizada nesta camada, garantindo que o hardware (ESP32) foque apenas na leitura e publicação de dados.</p>
-            <img src="diagrama arquitetura do projeto.jpeg" alt="Diagrama de Arquitetura" style="width: 100%; border-radius: 8px; margin-top: 15px; border: 1px solid #ddd;">
+            <p>O backend atua como a ponte central entre o vaso inteligente, os serviços de IA e o aplicativo móvel. Toda a lógica de validação, persistência, orquestração de voz, agendamento de regas e gestão de OTA fica concentrada nesta camada. O Gemini nunca aciona a bomba diretamente: ele apenas interpreta o pedido e o backend aplica todas as regras de segurança.</p>
+            <img src="diagrama arquitetura do projeto.jpeg" alt="Diagrama de Arquitetura do GreenSync" style="width: 100%; border-radius: 8px; margin-top: 15px; border: 1px solid #ddd;">
         </section>
 
         <section>
             <h2>Stack Tecnológico (Backend)</h2>
             <ul>
-                <li><strong>FastAPI:</strong> Serve a API HTTP (health check e, futuramente, endpoints <code>/perguntar</code> e <code>/audio</code> para IA) e gerencia o ciclo de vida do MQTT.</li>
-                <li><strong>aiomqtt:</strong> Cliente MQTT assíncrono, responsável pela conexão com o EMQX Cloud via TLS e reconexão automática.</li>
-                <li><strong>Pydantic:</strong> Realiza a validação estrita dos payloads que chegam do firmware (Modelos <code>SensorReading</code> e <code>DeviceStatus</code>).</li>
-                <li><strong>Firebase Admin SDK:</strong> Gerencia as gravações no Firestore utilizando permissões de administrador.</li>
+                <li><strong>FastAPI + uvicorn:</strong> Processo único assíncrono (<code>async</code>/<code>await</code>) rodando em Python 3.12 no <strong>Render</strong>.</li>
+                <li><strong>aiomqtt:</strong> Cliente MQTT assíncrono com reconexão automática e TLS conectado ao <strong>EMQX Serverless</strong>.</li>
+                <li><strong>Pydantic:</strong> Validação estrita dos payloads MQTT (<code>SensorReading</code> e <code>DeviceStatus</code>) e configurações.</li>
+                <li><strong>Firebase Admin SDK:</strong> Gravação em lote (<code>leitura_atual</code> + <code>historico</code>), agendamentos e registro de firmwares OTA no Firestore.</li>
+                <li><strong>google-genai (Google Gemini):</strong> Entendimento de texto/áudio com personalidade da planta e geração de resposta falada (TTS).</li>
+                <li><strong>Redis:</strong> Controle de limite de perguntas (10 por 60 s por chave) e contexto curto das últimas 3 trocas de conversa.</li>
+                <li><strong>Testes Automatizados:</strong> Suíte com <strong>973 testes</strong> em <code>pytest</code> cobrindo MQTT, validações, regras de rega, agendador, IA e OTA sem depender de serviços externos.</li>
             </ul>
         </section>
 
         <section>
-            <h2>Lógica de Persistência (Firestore)</h2>
-            <p>O backend assina o tópico <code>greensync/+/sensores</code>. Ao receber um payload válido, ele realiza uma gravação em lote (batch write) no Firestore na coleção <code>devices/{deviceId}</code>:</p>
-            <ul>
-                <li><code>leitura_atual</code>: Sobrescrito a cada nova mensagem para garantir que o aplicativo exiba os dados em tempo real.</li>
-                <li><code>historico/{autoId}</code>: Acumula um documento por leitura, alimentando os gráficos históricos do aplicativo.</li>
-            </ul>
-            <p>Mensagens fora do padrão do Pydantic são logadas e descartadas de forma segura, sem interromper o serviço.</p>
+            <h2>Principais Rotas da API</h2>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Autenticação e Função</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>POST /perguntar</code></td>
+                        <td><code>X-API-Key</code> — Perguntas em texto sobre a planta; retorna texto, estado, tela e eventual agendamento de rega.</td>
+                    </tr>
+                    <tr>
+                        <td><code>POST /audio</code></td>
+                        <td><code>X-API-Key</code> + <code>X-Device-Id</code> — Recebe WAV (16 kHz, 16 bits, mono, até 15 s) e devolve áudio WAV (24 kHz) com cabeçalhos <code>X-Tela</code> e <code>X-Dados</code>.</td>
+                    </tr>
+                    <tr>
+                        <td><code>POST /dispositivos/{id}/regar</code></td>
+                        <td><code>X-API-Key</code> — Aciona rega manual pelo app validando solo, status online, bomba e intervalo mínimo.</td>
+                    </tr>
+                    <tr>
+                        <td><code>POST /dispositivos/{id}/atualizar</code></td>
+                        <td><code>X-API-Key</code> — Solicita atualização OTA (<code>wroom</code> ou <code>s3</code>) a partir do registro <code>firmware/{alvo}</code>.</td>
+                    </tr>
+                    <tr>
+                        <td><code>PUT /firmware/{alvo}</code><br><code>POST /dispositivos/{id}/reverter</code></td>
+                        <td><code>X-Admin-Key</code> — Administração de releases OTA, rollback remoto e bloqueio de versões com falha.</td>
+                    </tr>
+                </tbody>
+            </table>
         </section>
 
         <section>
-            <h2>Execução e Deploy</h2>
-            <p>Para desenvolvimento local, o projeto utiliza <strong>Docker e Docker Compose</strong> para subir a aplicação FastAPI (com hot-reload na porta 8000) e um broker Mosquitto para testes.</p>
-            
+            <h2>Execução Local e Produção</h2>
+            <p>O ambiente local utiliza <strong>Docker Compose</strong> para subir o backend (hot-reload na porta 8000), um broker Mosquitto local e o Redis:</p>
             <div class="terminal">
 <pre><code>cd backend
 cp .env.example .env
-# Salve a chave do Firebase como backend/serviceAccountKey.json
-docker compose up</code></pre>
-            </div>
+# Salve a chave do Firebase em backend/serviceAccountKey.json (nunca commitar)
+docker compose up
 
-            <p><strong>Produção (Render):</strong> O deploy será feito via Render. O Dockerfile compila a imagem, e a variável <code>$PORT</code> dinâmica será injetada. A chave do Firebase (<code>serviceAccountKey.json</code>) deve ser configurada estritamente como um <em>Secret File</em> no painel do Render, nunca "commitada" no repositório.</p>
+# Rodar a suíte de 973 testes automatizados
+docker compose run --rm backend python -m pytest tests/ -v</code></pre>
+            </div>
+            <p><strong>Produção (Render):</strong> Deploy automático a partir da branch <code>main</code> com instância única, health check em <code>/health</code>, <code>serviceAccountKey.json</code> montada via <em>Secret File</em> (<code>/etc/secrets/</code>), Redis via Render Key Value e broker EMQX Serverless com TLS.</p>
         </section>
     </main>
 </body>
