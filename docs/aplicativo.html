@@ -8,33 +8,55 @@
 <body>
     <header class="cabecalho-amarelo">
         <div class="linha-superior">
-            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <img src="logo-planta.jpeg" alt="Logo GreenSync" class="logo">
             <div class="titulo-branco">PROJETO GREENSYNC</div>
         </div>
         <nav class="menu-branco">
             <a href="index.html">Home</a>
             <a href="plataforma.html">Plataforma</a>
             <a href="dispositivo.html">Dispositivo</a>
-            <a href="aplicativo.html">Aplicativo</a>
+            <a href="aplicativo.html" class="ativo">Aplicativo</a>
+            <a href="tecnologias.html">Tecnologias</a>
         </nav>
     </header>
 
     <main class="conteudo">
         <section>
             <h2>Aplicativo Mobile (Flutter)</h2>
-            <p>O aplicativo sincroniza os dados do vaso inteligente em tempo real através do Firebase (Firestore), permitindo o monitoramento do pH, umidade, temperatura e controle da irrigação.</p>
+            <p>Desenvolvido em <strong>Flutter / Dart</strong>, o aplicativo é a interface de acompanhamento e controle do ecossistema GreenSync. Ele sincroniza os dados diretamente do Firebase Firestore em tempo real, envia pedidos de rega ao backend e configura a rede Wi-Fi do vaso via Bluetooth Low Energy (BLE).</p>
+            <ul>
+                <li><strong>Dashboard em tempo real:</strong> Exibe temperatura do ar, umidade do ar, umidade do solo, pH e estado da bomba sem precisar recarregar a tela.</li>
+                <li><strong>Status de conexão:</strong> Indica se o vaso está <em>online</em> ou <em>offline</em> (via Last Will MQTT).</li>
+                <li><strong>Seleção dinâmica:</strong> Suporte para acompanhar múltiplos vasos.</li>
+                <li><strong>Histórico em gráficos:</strong> Visualização da evolução das leituras ao longo do tempo com <code>fl_chart</code>.</li>
+                <li><strong>Provisionamento Wi-Fi por BLE:</strong> Envio das credenciais de rede (2,4 GHz) ao dispositivo <code>GreenSync_BLE</code> via <code>flutter_blue_plus</code> com retorno em tempo real (<code>conectando</code>, <code>ok</code>, <code>erro:senha</code>, <code>erro:rede</code> ou <code>erro:timeout</code>).</li>
+            </ul>
         </section>
 
         <section>
             <h2>Estrutura de Dados (Firestore)</h2>
-            <p>A comunicação Backend ↔ App ocorre através da seguinte estrutura:</p>
-            <pre><code>
-devices/{deviceId}
-  ├── status, last_seen
+            <p>Coleções consumidas pelo aplicativo e gerenciadas pelo backend:</p>
+            <div class="terminal">
+<pre><code>devices/{deviceId}
+  ├── status, last_seen, fw, ota
   ├── leitura_atual: { ph, umidade_solo, temperatura_ar, umidade_ar, bomba_ligada, updated_at }
   ├── historico/{autoId}: ph, umidade_solo, temperatura_ar, umidade_ar, bomba_ligada, timestamp
-  └── agendamentos/{id}: executar_em, duracao_s, status, origem, criado_em (planejado)
-            </code></pre>
+  └── agendamentos/{id}: quando, duracao_s, status, origem, motivo, criado_em, atualizado_em
+
+firmware/{alvo}
+  └── versao, url, sha256, notas, anterior, bloqueadas</code></pre>
+            </div>
+        </section>
+
+        <section>
+            <h2>Como Executar Localmente</h2>
+            <p>Requer Flutter SDK compatível com Android SDK 37+ e um aparelho físico Android para testar o Bluetooth (BLE):</p>
+            <div class="terminal">
+<pre><code>cd app
+flutter pub get
+dart pub global run flutterfire_cli:flutterfire configure
+flutter run</code></pre>
+            </div>
         </section>
     </main>
 </body>
