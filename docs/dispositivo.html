@@ -8,54 +8,88 @@
 <body>
     <header class="cabecalho-amarelo">
         <div class="linha-superior">
-            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <img src="logo-planta.jpeg" alt="Logo GreenSync" class="logo">
             <div class="titulo-branco">PROJETO GREENSYNC</div>
         </div>
         <nav class="menu-branco">
             <a href="index.html">Home</a>
             <a href="plataforma.html">Plataforma</a>
-            <a href="dispositivo.html">Dispositivo</a>
+            <a href="dispositivo.html" class="ativo">Dispositivo</a>
             <a href="aplicativo.html">Aplicativo</a>
+            <a href="tecnologias.html">Tecnologias</a>
         </nav>
     </header>
 
     <main class="conteudo">
         <section>
-            <h2>Hardware Utilizado</h2>
-            <p>O ecossistema físico do vaso inteligente está sendo implementado de forma modular. Abaixo detalhamos o hardware ativo na fase atual e o escopo planejado:</p>
+            <h2>Microcontroladores do Vaso</h2>
             <ul>
-                <li><strong>Fase Atual (ESP32-WROOM):</strong> Microcontrolador principal ativo no momento. Responsável por ler os sensores ambientais (DHT22 e YL-69). Atualmente, a irrigação é validada utilizando um relé/servomotor para fins de teste. O dispositivo gerencia a comunicação via MQTT com a nuvem.</li>
-                <li><strong>Planejado para o Futuro (ESP32-S3 e Periféricos):</strong> Um segundo microcontrolador será adicionado para lidar exclusivamente com a interação do usuário. Ele controlará a captura de áudio (microfone INMP441), a reprodução de voz e um Display OLED (SSD1306) para exibir as emoções da planta. O sensor de pH e a bomba d'água definitiva também serão integrados nesta etapa.</li>
+                <li><strong>ESP32-WROOM-32 (v2.1.0 — Em bancada):</strong> Lê os sensores DHT22 e YL-69 (pH simulado conforme ADR-024), aciona a bomba via módulo relé de 2 canais (ativo em nível baixo, com diodo 1N4007), publica via MQTT/TLS no EMQX Cloud, configura Wi-Fi via <strong>BLE</strong> e recebe atualizações remotas via <strong>OTA</strong> com rollback automático.</li>
+                <li><strong>Seeed Studio XIAO ESP32-S3 (Em desenvolvimento):</strong> Responsável pela interação por voz — microfone <strong>INMP441</strong> (I2S), amplificador <strong>MAX98357</strong> (I2S), <strong>Display OLED SSD1306</strong> (I2C) e ativação local por voz ("Hi ESP" via ESP-SR), comunicando-se via HTTPS com o backend e UART com o WROOM.</li>
             </ul>
         </section>
 
         <section>
-            <h2>Contratos MQTT (QoS 1)</h2>
-            <p>Tópico de Leituras: <code>greensync/{deviceId}/sensores</code></p>
-            <pre><code>
-{
+            <h2>Circuito Eletrônico e Pinagem (ESP32-WROOM)</h2>
+            <img src="circuito.jpeg" alt="Esquema elétrico do GreenSync" style="width: 100%; border-radius: 8px; border: 1px solid #ddd; margin: 15px 0;">
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Função</th>
+                        <th>GPIO (WROOM)</th>
+                        <th>Observação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Relé da bomba (IN2)</td>
+                        <td>GPIO 23</td>
+                        <td>Ativo em nível baixo; fonte externa 5 V + diodo 1N4007</td>
+                    </tr>
+                    <tr>
+                        <td>DHT22 (Temp. e umidade do ar)</td>
+                        <td>GPIO 27</td>
+                        <td>Leitura descartada se falhar</td>
+                    </tr>
+                    <tr>
+                        <td>YL-69 (Umidade do solo)</td>
+                        <td>GPIO 33</td>
+                        <td>ADC1 (média de 16 leituras calibradas em %)</td>
+                    </tr>
+                    <tr>
+                        <td>Sensor de pH</td>
+                        <td>GPIO 34</td>
+                        <td>Reservado no ADC1 (simulado entre 6,0 e 7,0 na V1)</td>
+                    </tr>
+                    <tr>
+                        <td>UART com ESP32-S3</td>
+                        <td>GPIO 17 / 16</td>
+                        <td>TX / RX reservados para comunicação entre placas</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Contratos MQTT, BLE e OTA</h2>
+            <p><strong>Leituras (<code>greensync/{deviceId}/sensores</code>, a cada 30 s):</strong></p>
+            <div class="terminal">
+<pre><code>{
   "ph": 6.4,
   "umidade_solo": 42,
   "temperatura_ar": 24.1,
   "umidade_ar": 58,
   "bomba_ligada": false,
   "timestamp": 1735000000
-}
-            </code></pre>
-            <p><em>Nota: umidade_ar e timestamp são opcionais. umidade_solo já vem em % (calibrado). Se o DHT22 falhar, o firmware não publica.</em></p>
-            
-            <p>Tópico de Status: <code>greensync/{deviceId}/status</code></p>
-            <pre><code>{"status": "online"} // ou offline via Last Will</code></pre>
+}</code></pre>
+            </div>
+            <ul>
+                <li><strong>Status (<code>greensync/{deviceId}/status</code>):</strong> Publica <code>{"status": "online", "fw": "2.1.0"}</code> com <em>retain</em> ao conectar e registra <code>{"status": "offline"}</code> como Last Will.</li>
+                <li><strong>Comandos (<code>greensync/{deviceId}/comandos</code>, QoS 1):</strong> Aceita <code>regar</code> (limite de segurança de 15 s e deduplicação por <code>id</code>), <code>atualizar</code> e <code>reverter</code>.</li>
+                <li><strong>Provisionamento BLE:</strong> Abre como <code>GreenSync_BLE</code> quando sem rede salva ou após 4 falhas; só grava as credenciais na NVS após conexão bem-sucedida.</li>
+                <li><strong>OTA Seguro:</strong> Baixa <code>.bin</code> apenas por HTTPS de <code>github.com</code>, valida <strong>SHA-256</strong>, recusa atualizar com a bomba ligada e faz <em>rollback</em> automático se não confirmar conexão MQTT em até 5 minutos.</li>
+            </ul>
         </section>
-        <section>
-    <h2>Circuito Eletrónico</h2>
-    <p>Diagrama de ligações focado na leitura de dados vitais da planta e no controlo automático de irrigação.</p>
-    
-    <!-- Lembre-se de colocar o nome exato da imagem que fez o upload -->
-    <img src="circuito.jpeg" alt="Esquema elétrico do GreenSync com relé e sensor de pH" style="width: 100%; border-radius: 8px; border: 1px solid #ddd; margin: 15px 0;">
-    
-    <p><em>Nota técnica: Esta primeira versão do circuito contempla a infraestrutura de hardware principal descrita na Fase V1 do projeto. O sistema utiliza um ESP32-WROOM para processar os dados do sensor de temperatura/humidade (DHT22), humidade do solo (YL-69) e sensor de pH. A atuação da bomba de água é gerida através de um módulo de relé, com os componentes de maior consumo elétrico suportados por uma fonte de alimentação externa de 5V. A integração do hardware de voz (ESP32-S3) será feita em fases posteriores.</em></p>
-</section>
     </main>
 </body>
 </html>
