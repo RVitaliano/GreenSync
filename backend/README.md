@@ -37,6 +37,9 @@ backend/
     routes/
       ia.py              # POST /perguntar
       audio.py           # POST /audio
+      dispositivos.py    # POST /dispositivos/{device_id}/regar (rega manual) e /atualizar (pede o OTA)
+      firmware.py        # PUT /firmware/{alvo} (registro de firmware para o OTA, só administração)
+    ota/                 # validação (alvo, versão, sha256, url) e registro de firmware no Firestore
     ai/
       estado.py          # estado da planta (limiares) e frescor dos dados
       prompt.py          # personalidade da planta + dados reais + regras da rega
@@ -107,7 +110,7 @@ No `.env`, preencha host, porta (8883), usuário e senha do cluster e defina `MQ
 docker compose run --rm backend python -m pytest tests/ -v
 ```
 
-A suíte (440 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
+A suíte (973 testes) roda sem Gemini, Firestore, Redis ou MQTT reais: tudo é simulado, e cada teste usa os valores padrão de `app/config.py` (o `.env` não influencia o resultado). Cobre o estado e o frescor dos dados, o prompt, a resiliência do Gemini, a validação do áudio, a voz, as duas rotas, o limite de perguntas, as regras da rega, o agendador (inclusive reinício sem duplicar), a publicação do comando e a entrada MQTT (id do vaso, timestamp, reconexão).
 
 Scripts **manuais** (gastam cota do Gemini, por isso não rodam no pytest; precisam do `.env` com `GEMINI_API_KEY`):
 
@@ -139,9 +142,50 @@ Cabeçalhos `X-API-Key`, `X-Device-Id` e `Content-Type: audio/wav`. Corpo: WAV 1
 
 Contrato completo (e o que o firmware do S3 precisa saber, como o timeout de pelo menos 30 s): `docs/Arc42_GreenSync_SDD.md`, Seção 8.4.
 
+**Palavra de ativação (opcional, `WAKE_WORD_ATIVA=true`).** O S3 manda cada fala detectada; o backend só responde se ela **começar** com "GreenSync" (aceita "ei", "oi", "ok", "e aí" antes e erros de transcrição como "green sync" ou "greensinc"; "como está o greensync" não vale). Com a palavra ligada:
+
+- cada fala (ativada ou não) conta no limite de `WAKE_LIMITE_CLIPES_POR_MIN` por minuto, por chave de API (estourou: o mesmo 429 de sempre; sem Redis, ou com ele fora do ar, o limite é ignorado);
+- fala **sem** a palavra: `204` sem corpo e `X-Ativada: nao`. Sem voz, sem rega, sem contar no limite de perguntas, sem gravar no contexto, e o texto da fala não vai para o log;
+- fala **com** a palavra: fluxo normal (a pergunta segue sem a palavra, ex.: "como ela está?"), com `X-Ativada: sim` na resposta.
+
+O Gemini é chamado também para as falas ignoradas (é ele que transcreve). Desligada (padrão), nada muda: sem `204`, sem cabeçalho novo e sem limite novo. O firmware do S3 precisa tratar o `204` como "nada a tocar".
+
+> A palavra de ativação principal do vaso é detectada no próprio S3 ("Hi ESP", ESP-SR), antes de enviar o áudio. Esta opção do backend continua disponível como camada extra e fica desligada por padrão.
+
 ### Rega por voz
 
-Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s; a demonstração usa 15 s no `.env`), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Ver Seção 8.5 do Arc42.
+Funciona nas duas rotas: se a pessoa pedir ("regar daqui a 1 minuto", "cancela a rega"), o backend valida e a resposta falada já traz a confirmação ou a recusa. Limites padrão: atraso máximo de 24 h, duração máxima de 10 s (padrão 5 s; a demonstração usa 15 s no `.env`), 10 min entre regas, recusa com o vaso offline ou o solo acima de 80%. Na demonstração, o `.env` usa duração de 15 s e `REGA_INTERVALO_MIN_S=30`, para repetir a rega na frente do público. Ver Seção 8.5 do Arc42.
+
+### `POST /dispositivos/{device_id}/regar` (botão "Regar agora" do app)
+
+Cabeçalho `X-API-Key`; corpo opcional `{"duracao_s": 7}` (sem ele vale o padrão; menor que 1 ou não inteiro dá 422). Responde `{"resultado": "agendada" | "recusada" | "falhou", "id", "motivo"}`; em `recusada`, `motivo` é o código da regra (`sem_dados`, `offline`, `solo_encharcado`, `bomba_ligada`, `intervalo`, `duracao_grande`...). Erro inesperado: 502. Não usa Gemini nem o limite de perguntas; valem as mesmas regras da rega por voz.
+
+### `POST /dispositivos/{device_id}/atualizar` (pede ao vaso para se atualizar)
+
+Cabeçalho `X-API-Key`; corpo `{"alvo": "wroom" | "s3"}` (outro valor: 422). Versão, URL e hash vêm sempre do registro `firmware/{alvo}`; o app não consegue enviá-los. Responde `{"resultado": "solicitada" | "recusada" | "falhou", "id", "motivo", "versao"}`; recusas: `sem_firmware`, `firmware_invalido`, `sem_dados`, `offline`, `bomba_ligada`, `versao_igual`, `ota_em_curso` (nada é publicado). Grava `devices/{id}.ota` (`solicitada`) numa transação antes de publicar `{"acao":"atualizar",...}` no MQTT (QoS 1, sem retain); atualização parada há mais de `OTA_TIMEOUT_S` (600 s) é considerada travada. Os estados seguintes (baixando, aplicando, ok...) ainda não são escritos.
+
+### `POST /dispositivos/{device_id}/reverter` (administração: volta o vaso para a cópia anterior)
+
+Cabeçalho `X-Admin-Key` (a `X-API-Key` do app não vale; `ADMIN_API_KEY` vazia = 403); corpo `{"alvo": "wroom" | "s3"}`. Mesmas recusas e mesmo fluxo do `atualizar` (`sem_firmware`, `sem_dados`, `offline`, `bomba_ligada`, `versao_igual`, `ota_em_curso`), mas publica `{"acao":"reverter","alvo","id","versao"}` (a versão boa do registro; sem url nem hash) e grava `ota.tipo = "reverter"`. O `atualizar` passa a gravar `ota.tipo = "atualizar"`.
+
+### `POST /firmware/{alvo}/retirar` (administração: retira a versão atual do registro)
+
+`X-Admin-Key`. A versão atual entra em `bloqueadas` (o `PUT /firmware/{alvo}` passa a recusá-la com 409 `versao_bloqueada`) e a `anterior` volta a ser a atual. Sem `anterior`: 409 `sem_versao_anterior`. Responde com o registro novo e a lista de `bloqueadas`.
+
+### OTA automático (`OTA_AUTO`, desligado por padrão)
+
+Com `OTA_AUTO=true`, o backend manda o comando `atualizar` sozinho, reaproveitando o mesmo serviço da rota `/atualizar` (todas as recusas valem: offline, `bomba_ligada`, `ota_em_curso`...). Dois gatilhos, ambos em segundo plano (não atrasam o `PUT` nem o MQTT):
+
+- **`PUT /firmware/{alvo}`** com versão nova: tenta cada vaso `online` cuja versão instalada (`fw` para `wroom`, `fw_s3` para `s3`) seja **menor**.
+- **Status MQTT `online`**: confere o vaso que acabou de conectar. Se já alcançou a versão do registro, zera as tentativas.
+
+Só **sobe** de versão (comparação semver; `1.0.0-rc1` < `1.0.0`). Não atualiza se a versão instalada é desconhecida, se a do registro está em `bloqueadas`, se há atualização em andamento (solicitada, baixando, aplicando, com menos de `OTA_TIMEOUT_S`) ou se já houve `OTA_AUTO_TENTATIVAS` tentativas (padrão 2) dessa versão. As tentativas ficam em `devices/{id}.ota_auto.{alvo} = {versao, tentativas, ultimo_erro}` (um mapa por alvo: `wroom` e `s3` contam separado; o formato antigo, um mapa só, é ignorado); recusas (vaso offline, bomba ligada) não contam, só comandos realmente publicados. O `POST /dispositivos/{id}/reverter` passa a pôr a versão revertida (a instalada no vaso) em `bloqueadas` do registro.
+
+**Retentativa.** Se o despacho for recusado por `sem_dados` (vaso recém-conectado, sem leitura) ou `bomba_ligada`, o vaso entra numa lista **em memória** (`id -> alvos pendentes + contador`). A próxima leitura de sensores dele roda a verificação de novo, no máximo `OTA_AUTO_RETENTATIVAS` vezes (padrão 3; 0 desliga), e ele sai da lista ao resolver, ao esgotar as retentativas ou ao reiniciar o backend (um novo status `online` recomeça). A leitura de um vaso fora da lista só consulta esse dicionário: nenhum acesso ao Firestore. Outras recusas (offline, `versao_igual`, `ota_em_curso`...) não são retentadas.
+
+### `PUT /firmware/{alvo}` (administração do OTA)
+
+Alvo `wroom` ou `s3` (outro: 404). Cabeçalho `X-Admin-Key` (a `API_KEY` do app não vale); `ADMIN_API_KEY` vazia = rota desligada (403). Corpo `{"versao": "1.0.0", "url": "https://github.com/...", "sha256": "<64 hex>", "notas": "opcional"}`; só https, com host em `OTA_HOSTS_PERMITIDOS` (padrão `github.com`). Corpo inválido: 422; versão igual à atual: 409; sucesso: 200 com o registro gravado em `firmware/{alvo}` (o anterior vai para o campo `anterior`). Só registra: nenhum comando é enviado ao vaso (salvo com `OTA_AUTO` ligado, veja abaixo). O status MQTT aceita `fw` e `fw_s3` opcionais, gravados em `devices/{id}`.
 
 ## Contrato MQTT
 
@@ -160,6 +204,7 @@ Detalhes completos em `docs/Arc42_GreenSync_SDD.md`, Seção 8.1.
   ```
   `umidade_ar` e `timestamp` são opcionais; sem `timestamp`, o backend usa a hora do servidor.
 - **Status** — `greensync/{deviceId}/status` → `{"status": "online"}` (retido, ao conectar) ou `{"status": "offline"}` (Last Will do broker).
+- **Progresso do OTA** (vaso → backend) — `greensync/{deviceId}/ota`, QoS 1 → `{"alvo": "wroom", "id": "<id do comando>", "estado": "baixando" | "aplicando" | "ok" | "falhou" | "revertido", "versao": "1.2.0", "erro": "hash"}` (`erro` é um código curto, só em falhou/revertido). Só vale para a atualização atual (mesmo `id` e `alvo`), em ordem, e é refletido em `devices/{id}.ota`; a versão instalada continua vindo do status (`fw`, `fw_s3`).
 - **Comandos** (backend → vaso) — `greensync/{deviceId}/comandos`, QoS 1, **sem retain**:
   ```json
   {"acao": "regar", "duracao_s": 5, "id": "<idAgendamento>"}
@@ -189,9 +234,11 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `MQTT_HOST` / `MQTT_PORT` | Endereço do broker (Mosquitto local ou EMQX Cloud) |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | Credenciais do broker (vazias no Mosquitto local) |
 | `MQTT_USE_TLS` | `false` local, `true` no EMQX Cloud |
-| `MQTT_TOPIC_SENSORES` / `MQTT_TOPIC_STATUS` | Tópicos assinados |
+| `MQTT_TOPIC_SENSORES` / `MQTT_TOPIC_STATUS` / `MQTT_TOPIC_OTA` | Tópicos assinados (sensores, status e progresso do OTA) |
 | `MQTT_TOPIC_COMANDOS` | Tópico dos comandos (`greensync/{device_id}/comandos`) |
-| `FIREBASE_CREDENTIALS_PATH` | Caminho da chave de serviço do Firebase |
+| `FIREBASE_CREDENTIALS_PATH` | Caminho da chave de serviço do Firebase (padrão `serviceAccountKey.json`; no Render, `/etc/secrets/<arquivo>`) |
+| `PORT` | Porta do servidor (padrão 8000; o Render define sozinho). Lida pelo `Dockerfile`, não pelo Python |
+| `RENDER` | Definida pelo próprio Render; liga as checagens de produção (chave vazia/fraca = não sobe). Não cadastre |
 | `GEMINI_API_KEY` | Chave da API do Gemini |
 | `GEMINI_MODEL` / `GEMINI_MODEL_FALLBACK` | Modelo principal (padrão `gemini-3.5-flash-lite`) e reserva (`gemini-3.1-flash-lite`, usada se o principal der timeout ou 5xx) |
 | `TTS_MODEL` / `TTS_MODEL_FALLBACK` | Modelos da voz (opcionais) |
@@ -205,9 +252,13 @@ Todas têm padrão; o `.env.example` traz as principais.
 | `FUSO_UTC_H` | Fuso para "às 15h" (Brasília = -3) |
 | `GEMINI_TIMEOUT_S` / `GEMINI_TIMEOUT_AUDIO_S` / `TTS_TIMEOUT_S` | Prazo por chamada ao Gemini, em segundos: texto (padrão 8), áudio (25) e voz (15) |
 | `FIRESTORE_TIMEOUT_S` | Prazo para ler os dados do vaso no Firestore (padrão 5 s); passou disso, a pergunta segue como "sem dados" |
+| `WAKE_WORD_ATIVA` / `WAKE_WORD` / `WAKE_LIMITE_CLIPES_POR_MIN` | Palavra de ativação no `/audio` (padrão desligada), a palavra (padrão `greensync`) e quantas falas por minuto, por chave de API, podem chegar ao Gemini com ela ligada (padrão 20) |
 | `AUDIO_MAX_BYTES` / `AUDIO_MAX_S` | Tamanho (padrão 1000000 bytes) e duração (15 s) máximos do áudio recebido |
 | `TOM_PLANTA` | `planta` (divertido, padrão) ou `informativo` |
 | `SOLO_SECO_ABAIXO` / `SOLO_ENCHARCADO_ACIMA` / `TEMP_MIN` / `TEMP_MAX` / `PH_MIN` / `PH_MAX` | Limiares do estado da planta (padrão 30 %, 80 %, 10 °C, 35 °C, 5,5 e 7,5) |
+| `ADMIN_API_KEY` / `OTA_HOSTS_PERMITIDOS` | Chave da rota de firmware (vazia = desligada) e hosts permitidos nas URLs dos binários, separados por vírgula (padrão `github.com`) |
+| `OTA_AUTO` / `OTA_AUTO_TENTATIVAS` / `OTA_AUTO_RETENTATIVAS` | OTA automático (padrão `false`), tentativas por versão, alvo e vaso (padrão 2) e verificações extras nas próximas leituras quando o despacho é recusado por `sem_dados` ou `bomba_ligada` (padrão 3) |
+| `OTA_TIMEOUT_S` | Segundos sem andamento para uma atualização (OTA) ser considerada travada (padrão 600) |
 | `LOG_LEVEL` | Nível de log (`DEBUG`, `INFO`, `WARNING`...; valor desconhecido vale `INFO`) |
 
 ## Estado atual
@@ -220,11 +271,19 @@ Todas têm padrão; o `.env.example` traz as principais.
 | Limite de perguntas no Redis (429 + `Retry-After`) | Implementado |
 | `POST /perguntar` e `POST /audio` (Gemini + voz) | Implementado |
 | Rega por voz, agendamento persistente e comando MQTT | Implementado (execução no horário com o vaso real ainda não testada) |
-| Teste do Last Will com o firmware | Pendente |
+| Last Will (`offline` no Firestore quando o vaso cai) | Implementado |
 | Contexto curto da conversa no Redis (últimas 3 trocas, 5 min) | Implementado |
-| Deploy no Render (`$PORT` dinâmico, chave do Firebase como Secret File, EMQX no lugar do Mosquitto) | Pendente |
-| Teste de ponta a ponta com firmware e app | Pendente |
+| Deploy no Render (`$PORT` dinâmico, chave do Firebase como Secret File, EMQX no lugar do Mosquitto) | Implementado (produção) |
+| OTA (registro de firmware, `/atualizar`, `/reverter`, OTA automático) | Implementado e testado com o WROOM |
+| Teste de ponta a ponta com o WROOM e o backend | Concluído |
+| Teste de ponta a ponta com o S3 e o app | Em andamento |
 
 ## Produção (Render)
 
-O `Dockerfile` builda a imagem; falta ajustar o `CMD` para usar a variável `$PORT` do Render em vez de porta fixa e subir a chave do Firebase como Secret File (nunca no build da imagem). Em produção, use o Redis do Render (Key Value), o broker EMQX Cloud no lugar do Mosquitto e uma `API_KEY` aleatória (`openssl rand -hex 24`). O backend deve rodar em **instância única** (duas instâncias gravariam cada leitura em dobro). As demais variáveis de ambiente vão direto no painel do Render.
+- **Porta:** o `Dockerfile` sobe o uvicorn em `0.0.0.0` na porta de `$PORT` (padrão 8000 localmente; o Render define `PORT`).
+- **Saúde:** configure o *Health Check Path* como `/health`. A rota não acessa Firestore, MQTT nem Redis.
+- **Chave do Firebase:** suba como **Secret File** no Render e aponte `FIREBASE_CREDENTIALS_PATH=/etc/secrets/<nome-do-arquivo>`. Nada de segredo entra na imagem (`.dockerignore` exclui `.env`, `serviceAccountKey*.json`, `.git` e `tests`).
+- **Redis e MQTT:** use o Redis do Render (Key Value) em `REDIS_URL` e o EMQX Cloud em `MQTT_HOST`/`MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD` com `MQTT_USE_TLS=true`.
+- **Chaves:** `API_KEY` aleatória (`openssl rand -hex 24`). No Render (variável `RENDER=true`, que o próprio Render define) o backend **recusa subir** com `API_KEY` vazia ou fraca (menos de 12 caracteres ou valores como `1234`) e com `ADMIN_API_KEY` preenchida e fraca. `ADMIN_API_KEY` vazia é aceita: só desliga a rota de firmware. `MQTT_USE_TLS=false` ou broker local em produção geram aviso no log.
+- **Instância única:** duas instâncias gravariam cada leitura em dobro.
+- As demais variáveis de ambiente vão direto no painel do Render (lista completa na seção acima).

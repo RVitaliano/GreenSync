@@ -33,6 +33,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 
 from app.agenda.servico import tratar_acao
+from app.ai.ativacao import analisar_ativacao
 from app.ai.audio import AudioInvalido, validar_audio
 from app.ai.resiliencia import IAError
 from app.ai.responder import responder_audio
@@ -41,7 +42,7 @@ from app.ai.voz import sintetizar
 from app.config import settings
 from app.contexto import ler_contexto, salvar_turno
 from app.firebase_client import ler_leitura_segura
-from app.limite import verificar_limite
+from app.limite import verificar_limite, verificar_limite_clipes
 from app.seguranca import DEVICE_ID_PADRAO, chave_valida
 
 log = logging.getLogger("greensync.audio")
@@ -115,7 +116,13 @@ async def audio(
     except AudioInvalido as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    espera = await verificar_limite(x_api_key)
+    wake = settings.wake_word_ativa
+    if wake:
+        # Palavra de ativação ligada: cada fala (ativada ou não) conta no limite por minuto, que
+        # protege a cota do Gemini. O limite de PERGUNTAS só conta depois, se a fala for ativada.
+        espera = await verificar_limite_clipes(x_api_key)
+    else:
+        espera = await verificar_limite(x_api_key)
     if espera is not None:
         raise HTTPException(
             status_code=429,
@@ -135,8 +142,25 @@ async def audio(
         log.error("[%s] IA falhou: %s", x_device_id, e)
         raise HTTPException(status_code=502, detail="assistente indisponível")
 
+    pergunta = r["pergunta_ouvida"]
+    if wake:
+        ativada, pergunta = analisar_ativacao(pergunta, settings.wake_word)
+        if not ativada:
+            # Sem a palavra: descarta ANTES de qualquer efeito (rega, voz, limite de perguntas, contexto).
+            # Nada do que a pessoa falou vai para o log.
+            log.info("[%s] fala ignorada (sem palavra de ativação)", x_device_id)
+            return Response(status_code=204, headers={"X-Ativada": "nao"})
+        espera = await verificar_limite(x_api_key)
+        if espera is not None:
+            raise HTTPException(
+                status_code=429,
+                detail="limite de perguntas atingido, tente de novo em instantes",
+                headers={"Retry-After": str(espera)},
+            )
+
     # Pedido de rega por voz: o backend valida e troca a frase do modelo pela oficial.
-    rega = await tratar_acao(r.get("acao"), r["pergunta_ouvida"], x_device_id, leitura, r["estado"], "voz")
+    # (`pergunta` é a fala sem a palavra de ativação; sem a palavra ligada é a transcrição inteira.)
+    rega = await tratar_acao(r.get("acao"), pergunta, x_device_id, leitura, r["estado"], "voz")
     if rega:
         r["texto"] = rega["fala"]
     t_llm = time.monotonic() - t0
@@ -150,9 +174,9 @@ async def audio(
     t_tts = time.monotonic() - t0
 
     # A planta lembra desta troca (só se a pessoa disse algo; silêncio não é guardado).
-    await salvar_turno(x_device_id, r["pergunta_ouvida"], r["texto"])
+    await salvar_turno(x_device_id, pergunta, r["texto"])
 
-    tela = decidir_tela(r["pergunta_ouvida"])
+    tela = decidir_tela(pergunta)
     # Não registramos o que a pessoa falou (dado pessoal); só tamanhos e tempos.
     log.info("[%s] áudio %d B -> voz %d B | entender+responder %.1fs, voz %.1fs | tela=%s | rega=%s | %s, %s",
              x_device_id, len(corpo), len(wav), t_llm, t_tts, tela,
@@ -162,6 +186,8 @@ async def audio(
         "X-Tela": tela,
         "X-Dados": dados_para_display(leitura, r["estado"]),
     }
+    if wake:
+        cabecalhos["X-Ativada"] = "sim"
     if debug:
         cabecalhos["X-Ouviu"] = quote(r["pergunta_ouvida"])
         cabecalhos["X-Texto"] = quote(r["texto"])

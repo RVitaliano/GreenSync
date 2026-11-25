@@ -60,3 +60,38 @@ async def verificar_limite(x_api_key: str) -> int | None:
     if contagem > settings.limite_perguntas:
         return max(1, math.ceil((janela + 1) * janela_s - agora))
     return None
+
+def _chave_clipes(x_api_key: str, janela: int) -> str:
+    h = hashlib.sha256(x_api_key.encode()).hexdigest()[:16]
+    return f"wk:{h}:{janela}"
+
+
+async def verificar_limite_clipes(x_api_key: str) -> int | None:
+    """Palavra de ativação ligada: conta mais uma FALA (qualquer uma, ativada ou não) para esta chave.
+
+    Mesmo critério do limite de perguntas (por chave de API), mas com janela fixa de 1 minuto e o
+    limite WAKE_LIMITE_CLIPES_POR_MIN. Protege a cota do Gemini de um microfone que não para de
+    mandar falas. Devolve None se pode seguir, ou os segundos até a próxima janela. Sem Redis, ou
+    com o Redis fora do ar, deixa passar (igual ao limite de perguntas).
+    """
+    r = redis_client.get_redis()
+    if r is None:
+        return None
+
+    agora = _agora()
+    janela_s = 60
+    janela = int(agora // janela_s)
+    chave = _chave_clipes(x_api_key, janela)
+
+    try:
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.incr(chave)
+            pipe.expire(chave, janela_s * 2)
+            contagem, _ = await pipe.execute()
+    except (RedisError, OSError) as e:
+        log.error("Redis indisponível, limite de falas por minuto ignorado: %s", e)
+        return None
+
+    if contagem > settings.wake_limite_clipes_por_min:
+        return max(1, math.ceil((janela + 1) * janela_s - agora))
+    return None

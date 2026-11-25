@@ -1,6 +1,6 @@
 # Arc42 — Documento de Arquitetura de Software (SDD) — GreenSync
 
-> **Versão 0.7 — 09/11/2026.** O pH passa a ser falado sempre com o valor exato (Seção 8.6, ADR-027), as rotas ganham testes contra falha real do Firestore (Seção 8.8) e entra a estratégia de testes (Seção 8.10, ADR-028, com o Plano de Testes em formato IEEE 829). Versão anterior: **0.6 — 09/11/2026.** Revisão do backend: trava de palavra também no cancelamento, publicação incerta de comando, Firestore lento tratado como "sem dados", padrões do Gemini e novas limitações conhecidas (Seções 8.5, 8.8 e 11). Versão anterior: **0.5 — 03/11/2026.** Atualizado com o backend implementado (inclui o contexto curto da conversa no Redis): contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). Itens marcados **[A DEFINIR]** dependem de confirmação do grupo, do professor ou de teste prático. Itens marcados **(proposta)** foram sugeridos, mas ainda não validados com a frente responsável.
+> **Versão 0.8 — 23/11/2026.** Atualizado com o firmware do WROOM funcionando (sensores reais, bomba, BLE e OTA), a rega somente por comando (ADR-031), a configuração de Wi-Fi por BLE (ADR-029), a atualização OTA (ADR-030, Seção 8.11) e a palavra de ativação no S3 (ADR-032). Versão anterior: **0.7 — 09/11/2026.** O pH passa a ser falado sempre com o valor exato (Seção 8.6, ADR-027), as rotas ganham testes contra falha real do Firestore (Seção 8.8) e entra a estratégia de testes (Seção 8.10, ADR-028, com o Plano de Testes em formato IEEE 829). Versão anterior: **0.6 — 09/11/2026.** Revisão do backend: trava de palavra também no cancelamento, publicação incerta de comando, Firestore lento tratado como "sem dados", padrões do Gemini e novas limitações conhecidas (Seções 8.5, 8.8 e 11). Versão anterior: **0.5 — 03/11/2026.** Atualizado com o backend implementado (inclui o contexto curto da conversa no Redis): contrato HTTP de áudio (Seção 8.4), contrato do tópico de comandos (8.1), esquema dos agendamentos (8.2), limites da rega (8.5), frescor dos dados, resiliência e limite de perguntas (8.7 a 8.9) e as ADR-024 a ADR-026. Atualizações anteriores: 01/10/2026 (ADR-023, display no ESP32-S3) e 21/09/2026 (ADR-014 a ADR-022). 
 
 ---
 
@@ -8,7 +8,7 @@
 
 ## 1.1 Requirements Overview
 
-O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla irrigação automática, sincroniza dados em tempo real com um aplicativo mobile e responde perguntas faladas sobre a planta. O assistente "fala como a planta" (primeira pessoa, com base nos dados reais dos sensores) e também pode agendar regas por comando de voz, sempre com validação no backend e limites no firmware.
+O GreenSync é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, controla a irrigação por comandos validados, sincroniza dados em tempo real com um aplicativo mobile e responde perguntas faladas sobre a planta. O assistente "fala como a planta" (primeira pessoa, com base nos dados reais dos sensores) e também pode agendar regas por comando de voz, sempre com validação no backend e limites no firmware.
 
 O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, comunicação via MQTT) e um ESP32-S3 (voz e display, comunicação via HTTP com o backend). Ver o documento SRS — Requisitos para a especificação completa e verificável.
 
@@ -20,7 +20,6 @@ O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, com
 | 2 | Segurança da atuação | Rega por voz ou agenda não pode alagar o vaso nem queimar a bomba: limites no backend **e** no firmware |
 | 3 | Simplicidade de integração entre as três frentes | Grupo pequeno (3 pessoas), trabalho paralelo depende de contratos de interface bem definidos (MQTT/JSON, Firestore, HTTP de áudio) |
 | 4 | Baixo custo operacional | Projeto acadêmico — camadas gratuitas onde possível; o único custo recorrente previsto é o serviço pago do Render (valor a confirmar, ver ADR-019) |
-| 5 | Independência de rede local (V2) | Objetivo explícito de funcionar via GPRS, sem depender de Wi-Fi doméstico |
 
 ## 1.3 Stakeholders
 
@@ -29,16 +28,16 @@ O sistema usa **dois microcontroladores**: um ESP32-WROOM (sensores e bomba, com
 | Frente — Hardware/Firmware | Equipe GreenSync | Contratos MQTT (WROOM) e HTTP de áudio (S3) estáveis e definidos cedo, para trabalhar em paralelo |
 | Frente — App/Design | Equipe GreenSync | Esquema do Firestore estável, para consumir dados corretamente no app |
 | Frente — Backend | Equipe GreenSync | Visão completa da integração entre hardware, nuvem, IA e app |
-| Professor orientador | — | Uso de MQTT e Redis (conteúdo da disciplina), projeto funcional de ponta a ponta na demonstração |
+| Avaliadores da demonstração | — | Ver o projeto funcionando de ponta a ponta e entender as decisões técnicas (MQTT, Redis, IA) |
 
 ---
 
 # 2. Architecture Constraints
 
-- Protocolo de comunicação entre o dispositivo de sensores e a nuvem deve ser MQTT (exigência da disciplina); broker **EMQX Cloud** (ADR-014).
+- Protocolo de comunicação entre o dispositivo de sensores e a nuvem é MQTT; broker **EMQX Cloud** (ADR-014).
 - Dois microcontroladores: **ESP32-WROOM** (sensores, bomba) e **ESP32-S3** (voz e display) (ADR-016, ADR-023).
 - Backend em Python + FastAPI, em **processo único** com `async`/`await`, **sem Celery** (ADR-013, ADR-015).
-- **Redis** presente na arquitetura, por exigência do professor; usos definidos na ADR-015.
+- **Redis** presente na arquitetura; usos definidos na ADR-015.
 - Aplicativo em Flutter.
 - Banco de dados em nuvem: Firebase (Firestore).
 - LLM: Google Gemini (ADR-004, ADR-018).
@@ -71,7 +70,7 @@ ESP32-S3 ──HTTPS + X-API-Key──> Backend ──────────�
  (voz, display)   <─── áudio da resposta + estado da tela ───┘   Gemini TTS (voz)
 ```
 
-Os dois ESPs pertencem ao mesmo vaso lógico (`deviceId`, ex.: `vaso-01`), e o backend é o único ponto que os conecta. Na V2, o WROOM pode usar um módulo GPRS em vez de Wi-Fi como camada de rede subjacente ao MQTT; o S3 permanece em Wi-Fi (o áudio é pesado para dados móveis).
+Os dois ESPs pertencem ao mesmo vaso lógico (`deviceId`, ex.: `vaso-01`), e o backend é o único ponto que os conecta. O app configura o Wi-Fi do WROOM por BLE (ADR-029), e o WROOM baixa as atualizações de firmware do GitHub (ADR-030).
 
 ---
 
@@ -81,9 +80,9 @@ A estratégia central é manter os firmwares simples e concentrar a lógica no b
 
 Decisões que sustentam essa estratégia:
 
-- **MQTT para sensores** (em vez de o ESP escrever direto no Firebase): atende ao requisito da disciplina e tolera melhor conexões intermitentes.
+- **MQTT para sensores** (em vez de o ESP escrever direto no Firebase): é um protocolo leve, de publicação e assinatura, e tolera melhor conexões intermitentes.
 - **HTTP para áudio**: áudio é grande demais para o MQTT, que é feito para mensagens pequenas (ADR-017).
-- **A irrigação por umidade continua no firmware**, com histerese, como regra base. Voz e agenda são camadas por cima — a planta não depende da nuvem para sobreviver.
+- **A rega é sempre um comando validado pelo backend** (app, voz ou agenda), e o firmware aplica as próprias defesas (tempo máximo, `id` repetido ignorado). Não há irrigação automática no firmware (ADR-031).
 - **Processo único** (uvicorn) com `async`/`await`, sem workers: a chamada ao LLM roda dentro da requisição e as regas agendadas viram tarefas `asyncio` persistidas no Firestore (ADR-015, ADR-021).
 - **Display junto com a voz, no mesmo dispositivo (S3)**: a troca de tela acontece no mesmo momento em que o assistente responde, então fica no mesmo HTTP de áudio em vez de depender de uma segunda via de comunicação para sincronizar os dois ESPs (ADR-023).
 - **Construção em camadas**: cada peça é validada isoladamente (Docker → MQTT → validação → Firestore → Redis → IA em texto → áudio) antes de a próxima ser adicionada.
@@ -102,24 +101,24 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 
 ### Firmware WROOM (ESP32-WROOM)
 
-- Purpose/Responsibility: ler sensores (pH, umidade do solo, temperatura e umidade do ar), controlar a bomba d'água, publicar leituras e status via MQTT, assinar o tópico de comandos de rega, aplicar limite de tempo máximo de bomba ligada, e permitir configurar o Wi-Fi sem regravar (portal de configuração, ADR-022). Não possui display — o WROOM não tem indicação visual local (ADR-023).
-- Interface(s): MQTT sobre TLS (publisher e assinante).
-- Fulfilled Requirements: REQ-FUNC-001, REQ-FUNC-002, REQ-FUNC-003, REQ-FUNC-007 (lado do dispositivo), REQ-FUNC-010 (V2), REQ-FUNC-011 (execução), REQ-FUNC-013.
-- Open Issues/Problems/Risks: confiabilidade da sonda de pH e desgaste do sensor de solo resistivo (Seção 11); lógica não bloqueante para conviver com a conexão MQTT persistente.
+- Purpose/Responsibility: ler sensores (pH, umidade do solo, temperatura e umidade do ar), controlar a bomba d'água somente por comando, publicar leituras e status via MQTT, assinar o tópico de comandos (rega, atualização e reversão), aplicar limite de tempo máximo de bomba ligada, configurar o Wi-Fi por BLE (ADR-029) e atualizar o próprio firmware pela rede (OTA, ADR-030). Não possui display — o WROOM não tem indicação visual local (ADR-023).
+- Interface(s): MQTT sobre TLS (publisher e assinante) e BLE (configuração de Wi-Fi).
+- Fulfilled Requirements: REQ-FUNC-001, REQ-FUNC-002, REQ-FUNC-003, REQ-FUNC-007 (lado do dispositivo), REQ-FUNC-011 (execução), REQ-FUNC-013, REQ-FUNC-017.
+- Open Issues/Problems/Risks: confiabilidade da sonda de pH e desgaste do sensor de solo resistivo (Seção 11); lógica não bloqueante para conviver com a conexão MQTT persistente; validação do certificado do broker e do download do OTA, ainda desativada na bancada (Seção 8.3).
 
 ### Firmware S3 (ESP32-S3)
 
-- Purpose/Responsibility: capturar o áudio da pergunta (microfone INMP441), enviá-lo ao backend por HTTP, reproduzir o áudio da resposta no alto-falante, oferecer mute físico do microfone, e controlar o display OLED (SSD1306) — por padrão mostrando uma carinha que representa a personalidade da planta (ADR-021) e trocando temporariamente para os dados dos sensores quando o backend indica, ao final de uma pergunta por voz (ADR-023, REQ-FUNC-016). O firmware do S3 só executa a troca de tela; não decide sozinho quando trocar. Também precisa do provisionamento de Wi-Fi.
+- Purpose/Responsibility: capturar o áudio da pergunta (microfone INMP441), enviá-lo ao backend por HTTP, reproduzir o áudio da resposta no alto-falante, oferecer mute físico do microfone, e controlar o display OLED (SSD1306) — por padrão mostrando uma carinha que representa a personalidade da planta (ADR-021) e trocando temporariamente para os dados dos sensores quando o backend indica, ao final de uma pergunta por voz (ADR-023, REQ-FUNC-016). O firmware do S3 só executa a troca de tela; não decide sozinho quando trocar. A palavra de ativação ("Hi ESP", ADR-032) é detectada no próprio S3, e a rede Wi-Fi chega pela ponte UART com o WROOM (ADR-029).
 - Interface(s): HTTPS para o backend, com `X-API-Key` (Seção 8.4).
-- Fulfilled Requirements: REQ-FUNC-008, REQ-FUNC-009, REQ-FUNC-013, REQ-FUNC-014 (lado do cliente), REQ-FUNC-016.
-- Open Issues/Problems/Risks: qualidade do áudio (I2S), formato do áudio enviado e forma de acionamento (botão "falar" ou wake-word) **[A DEFINIR]**; o formato do áudio enviado e o estado da tela já estão definidos no backend (Seção 8.4), falta o S3 implementar; o áudio de resposta tem cerca de 350 a 380 KB (24 kHz), o que exige conferir a memória do S3 (Seção 11).
+- Fulfilled Requirements: REQ-FUNC-008, REQ-FUNC-009, REQ-FUNC-013, REQ-FUNC-014 (lado do cliente), REQ-FUNC-016, REQ-FUNC-018.
+- Open Issues/Problems/Risks: qualidade do áudio (I2S) e estabilidade da fiação do protótipo; o formato do áudio enviado e o estado da tela já estão definidos no backend (Seção 8.4), e o cliente do S3 está em desenvolvimento; o áudio de resposta tem cerca de 350 a 380 KB (24 kHz), o que cabe nos 8 MB de PSRAM do S3 (Seção 11).
 
 ### Broker MQTT (EMQX Cloud)
 
 - Purpose/Responsibility: receber mensagens publicadas pelo WROOM e redistribuí-las ao backend assinante; entregar comandos do backend ao WROOM; publicar a mensagem de "last will" em caso de desconexão inesperada.
-- Interface(s): MQTT sobre TLS (porta 8883). Alternativa contra firewall (MQTT sobre WebSocket seguro na 443) **[A DEFINIR]**.
+- Interface(s): MQTT sobre TLS (porta 8883). Alternativa contra firewall: MQTT sobre WebSocket seguro na 443.
 - Fulfilled Requirements: REQ-FUNC-003, REQ-FUNC-007, REQ-FUNC-011.
-- Open Issues/Problems/Risks: limites do plano gratuito/serverless do EMQX Cloud **[A DEFINIR]** (ver Seção 11).
+- Open Issues/Problems/Risks: limites do plano serverless do EMQX Cloud (ver Seção 11).
 
 ### Backend (Python + FastAPI, Render)
 
@@ -133,7 +132,7 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 - Purpose/Responsibility: contexto curto da conversa por dispositivo (com expiração) e limite de perguntas por chave de API. Uso como cache da última leitura é opcional.
 - Interface(s): protocolo Redis, acessado só pelo backend, via `REDIS_URL`.
 - Fulfilled Requirements: REQ-FUNC-015 (e apoio ao REQ-FUNC-008).
-- Open Issues/Problems/Risks: o Redis guarda só dados descartáveis (contador do limite e as últimas trocas da conversa); se faltar ou cair, o assistente segue sem limite e sem contexto; no plano gratuito do Render, o Key Value (se disponível) é só em memória e perde dados ao reiniciar — aceito, pois o conteúdo é descartável. Expectativa exata do professor sobre o uso do Redis **[A DEFINIR]**.
+- Open Issues/Problems/Risks: o Redis guarda só dados descartáveis (contador do limite e as últimas trocas da conversa); se faltar ou cair, o assistente segue sem limite e sem contexto; no plano gratuito do Render, o Key Value (se disponível) é só em memória e perde dados ao reiniciar — aceito, pois o conteúdo é descartável.
 
 ### Firebase (Firestore)
 
@@ -144,8 +143,8 @@ O sistema é dividido em blocos alinhados às responsabilidades das três frente
 ### App (Flutter)
 
 - Purpose/Responsibility: exibir dados em tempo real, histórico, estado da planta e status online/offline; único meio de acompanhamento visual do usuário (sem dashboard web).
-- Interface(s): FlutterFire (Firestore).
-- Fulfilled Requirements: REQ-FUNC-005, REQ-FUNC-006, REQ-FUNC-007 (exibição).
+- Interface(s): FlutterFire (Firestore), HTTP (pedido de rega) e BLE (configuração de Wi-Fi do vaso).
+- Fulfilled Requirements: REQ-FUNC-005, REQ-FUNC-006, REQ-FUNC-007 (exibição), REQ-FUNC-013 (envio da rede).
 
 ### Name interface 1 — Tópicos MQTT (WROOM ↔ Broker ↔ Backend)
 
@@ -163,11 +162,11 @@ Contrato de endpoint, cabeçalhos e formato de áudio entre o S3 e o backend, in
 
 ### White Box: Firmware WROOM
 
-Módulos internos: leitura de sensores (com calibração do sensor de solo e descarte de leituras inválidas do DHT22), controle de irrigação (histerese e tempo máximo de bomba), cliente MQTT (publicação, Last Will, assinatura de comandos), provisionamento de Wi-Fi.
+Módulos internos: leitura de sensores (com calibração do sensor de solo e descarte de leituras inválidas do DHT22), execução de comandos de rega (`id` repetido ignorado e tempo máximo de bomba), cliente MQTT (publicação, Last Will, assinatura de comandos), provisionamento de Wi-Fi por BLE e atualização OTA com rollback.
 
 ### White Box: Firmware S3
 
-Módulos internos: captura de áudio (I2S), botão de falar e mute, cliente HTTP, reprodução de áudio (I2S), controle do display OLED (carinha/dados, ADR-023), provisionamento de Wi-Fi.
+Módulos internos: captura de áudio (I2S), botão de falar e mute, cliente HTTP, reprodução de áudio (I2S), detecção da palavra de ativação, controle do display OLED (carinha/dados, ADR-023) e ponte UART com o WROOM para a rede.
 
 ### White Box: Backend
 
@@ -186,6 +185,8 @@ Módulos internos: captura de áudio (I2S), botão de falar e mute, cliente HTTP
 | `ai/audio.py`, `ai/voz.py` | Validação e medição do áudio recebido; TTS do Gemini (WAV) | Implementado |
 | `ai/tela.py` | Decisão do estado da tela (`rosto` ou `dados`, ADR-023) | Implementado |
 | `routes/ia.py`, `routes/audio.py` | `POST /perguntar` (texto) e `POST /audio`, com `X-API-Key` | Implementado |
+| `routes/dispositivos.py` | `POST /dispositivos/{id}/regar` (rega manual do app), `/atualizar` e `/reverter` | Implementado |
+| `routes/firmware.py`, `ota/` | Registro de firmware (`PUT /firmware/{alvo}`, `/retirar`), validação de versão, URL e SHA-256, OTA automático opcional | Implementado |
 | `agenda/regras.py`, `agenda/fala.py` | Regras de validação da rega e frases faladas de confirmação, recusa e cancelamento | Implementado |
 | `agenda/repositorio.py`, `agenda/agendador.py`, `agenda/servico.py` | Persistência no Firestore, execução no horário sem duplicar, recarga no reinício e orquestração do pedido | Implementado (execução no horário ainda não confirmada com o vaso real) |
 | Contexto da conversa (Redis) | Últimas 3 trocas por dispositivo, com expiração de 5 min (`app/contexto.py`) | Implementado |
@@ -207,19 +208,16 @@ Não detalhado nesta versão do documento — nível de profundidade não necess
 5. O backend grava a leitura atual (sobrescrevendo) e adiciona um registro ao histórico no Firestore, em um único lote.
 6. O app, com um listener ativo no Firestore, atualiza a tela automaticamente.
 
-## 6.2 Runtime Scenario 2 — Irrigação automática (regra base, no firmware)
+## 6.2 Runtime Scenario 2 — Rega por comando (execução no firmware)
 
-1. O firmware detecta, na leitura periódica, que a umidade do solo está abaixo do limiar configurado.
-2. O firmware aciona a bomba d'água.
-3. O firmware publica o novo estado (`bomba_ligada: true`) junto com a leitura de sensores.
-4. Quando a umidade volta ao patamar adequado (considerando a histerese), o firmware desliga a bomba e publica o novo estado.
-5. Independentemente de qualquer comando, o firmware limita o tempo máximo de bomba ligada.
+1. O backend publica `{"acao":"regar","duracao_s":N,"id":...}` em `greensync/{deviceId}/comandos` (origem: botão do app, pedido por voz ou agenda, já validado, cenário 6.4).
+2. O firmware confere se o `id` já foi executado (repetido é ignorado) e limita a duração a `BOMBA_MAX_S` (15 s), mesmo que o comando peça mais.
+3. O firmware liga a bomba (relé em nível baixo), publica `bomba_ligada: true` na leitura seguinte e desliga ao fim do tempo.
+4. O firmware nunca rega por conta própria (ADR-031). A recusa de regas com a bomba já ligada, o intervalo mínimo e o solo encharcado são conferidos pelo backend.
 
-Este cenário não depende da nuvem: funciona mesmo com backend, broker ou Gemini fora do ar.
+## 6.3 Runtime Scenario 3 — Pergunta ao assistente de voz (V2)
 
-## 6.3 Runtime Scenario 3 — Pergunta ao assistente de voz (V1)
-
-1. O usuário aciona o microfone do S3 (botão "falar" — **[A DEFINIR]**, wake-word é alternativa) e faz a pergunta. Até aqui, o display do S3 mostra a carinha da planta (padrão, ADR-023).
+1. O usuário diz a palavra de ativação ("Hi ESP", ADR-032) e faz a pergunta (nos testes, um botão pode acionar a captura). Até aqui, o display do S3 mostra a carinha da planta (padrão, ADR-023).
 2. O S3 envia o áudio ao backend por `POST /audio`, com `X-API-Key` e o `deviceId`.
 3. O backend valida a `X-API-Key` e o `X-Device-Id` e valida o áudio (formato, tamanho e duração); só então conta a pergunta no limite do Redis. Chave errada e áudio inválido não gastam o limite.
 4. O backend lê a leitura atual do Firestore e as últimas trocas da conversa no Redis (Seção 8.9), calcula o estado da planta (limiares configuráveis) e se o dado é recente (Seção 8.7), e monta o prompt com a personalidade da planta.
@@ -247,10 +245,18 @@ Este cenário não depende da nuvem: funciona mesmo com backend, broker ou Gemin
 
 ## 6.6 Runtime Scenario 6 — Primeira configuração de Wi-Fi (ou troca de rede)
 
-1. Sem rede salva (ou com falha de conexão), o ESP abre uma rede própria (ex.: `GreenSync-Setup`).
-2. O usuário conecta o celular a ela e escolhe a rede e a senha em uma página de configuração.
-3. O ESP grava as credenciais na memória flash e reinicia já conectado.
-4. Um botão físico, mantido pressionado, apaga a rede salva e reabre o portal.
+1. Sem rede salva (ou depois de 4 falhas seguidas de conexão), o WROOM passa a anunciar o BLE `GreenSync_BLE`.
+2. No app, o usuário conecta ao `GreenSync_BLE` e informa a rede e a senha, enviadas como `ssid,senha`.
+3. O vaso tenta conectar e notifica o app (`conectando`, `ok` ou `erro:senha`, `erro:rede`, `erro:timeout`).
+4. Só depois de conectar com sucesso as credenciais são gravadas na memória (NVS); uma senha errada não apaga a rede anterior.
+
+## 6.7 Runtime Scenario 7 — Atualização de firmware (OTA)
+
+1. Uma nova versão é publicada como *release* no GitHub, e a GitHub Action registra versão, URL e SHA-256 no backend (`PUT /firmware/{alvo}`).
+2. O backend publica `{"acao":"atualizar", ...}` em `greensync/{deviceId}/comandos` (pela rota `/atualizar` ou automaticamente, se `OTA_AUTO` estiver ligado), depois de conferir que o vaso está online e com a bomba desligada.
+3. O vaso baixa o binário por HTTPS de `github.com`, calcula o SHA-256 enquanto grava na partição inativa e publica o progresso em `greensync/{deviceId}/ota`.
+4. Se o hash bater, o vaso reinicia na nova partição. O firmware novo precisa se confirmar (conectar ao MQTT); se não o fizer em 5 minutos, ou reiniciar mais de 3 vezes sem se confirmar, o vaso volta sozinho à versão anterior.
+5. Uma versão ruim pode ser desfeita por `POST /dispositivos/{id}/reverter` e retirada do registro por `POST /firmware/{alvo}/retirar`, que a bloqueia.
 
 ---
 
@@ -272,11 +278,12 @@ Custo baixo (um serviço pago; valores a confirmar no site do Render antes de co
 |---|---|
 | Firmware WROOM | ESP32-WROOM físico, no vaso |
 | Firmware S3 | ESP32-S3 físico, no vaso (com display OLED) |
-| Broker MQTT | EMQX Cloud (plano gratuito/serverless **[A DEFINIR]**) |
+| Broker MQTT | EMQX Cloud (serverless) |
 | Backend | Render — serviço web pago (Starter, 512 MB de RAM), instância única, sempre ativo |
-| Redis | Render Key Value (plano gratuito ou pago **[A DEFINIR]**) |
+| Redis | Render Key Value |
 | Banco de dados | Firebase Firestore, região `southamerica-east1` |
-| LLM / áudio de entrada | Google Gemini API (camada gratuita; cotas **[A DEFINIR]**) |
+| LLM / áudio de entrada | Google Gemini API (camada gratuita) |
+| Binários do firmware (OTA) | GitHub Releases |
 | App | Dispositivos móveis dos usuários/avaliadores |
 
 ## 7.2 Infrastructure Level 2
@@ -298,9 +305,9 @@ A chave de serviço do Firebase fica **fora da imagem**: é montada como volume 
 
 O serviço roda **um processo** (uvicorn): API HTTP, assinante MQTT e chamadas à IA. Não há worker, `beat` nem `supervisord` (ADR-015). Gatilhos para reavaliar a arquitetura de hospedagem: uso de memória próximo dos 512 MB, reinícios por falta de memória, ou respostas de voz lentas por disputa de CPU.
 
-### Infrastructure Element 3 — Conectividade dos dispositivos (V1: Wi-Fi / V2: GPRS)
+### Infrastructure Element 3 — Conectividade dos dispositivos (Wi-Fi)
 
-Na V1, os dois ESPs se conectam a uma rede Wi-Fi com acesso à internet, configurada por portal (ADR-022), com suporte a mais de uma rede (casa e faculdade). Na V2, o WROOM pode passar a usar um módulo GPRS/GSM com chip SIM — a camada MQTT permanece a mesma. Redes de faculdade podem bloquear portas de saída diferentes de 80/443; a porta 8883 deve ser testada na rede real **[A DEFINIR]**.
+Os dois ESPs se conectam a uma rede Wi-Fi com acesso à internet, configurada por BLE pelo app (ADR-029), podendo ser trocada sem regravar o firmware (casa e faculdade). Redes de faculdade podem bloquear portas de saída diferentes de 80/443; a porta 8883 deve ser testada na rede real; o hotspot do celular é a alternativa.
 
 ---
 
@@ -308,7 +315,7 @@ Na V1, os dois ESPs se conectam a uma rede Wi-Fi com acesso à internet, configu
 
 ## 8.1 Contrato MQTT (Firmware WROOM ↔ Backend)
 
-**Versão 1 do contrato — [A CONFIRMAR COM A FRENTE DE FIRMWARE]** (campos, unidades e intervalo de leitura).
+**Versão 1 do contrato**, em uso entre o firmware do WROOM e o backend.
 
 - Tópico de leituras: `greensync/{deviceId}/sensores`
 - Payload (JSON):
@@ -332,13 +339,13 @@ Na V1, os dois ESPs se conectam a uma rede Wi-Fi com acesso à internet, configu
 | `bomba_ligada` | booleano | sim | — | Estado atual da bomba |
 | `timestamp` | inteiro | não | — | Unix, em segundos. Se ausente, o backend usa a hora do servidor |
 
-Regras: campos extras são ignorados; payload inválido é registrado em log e descartado, sem derrubar o backend; se a leitura do DHT22 falhar (`NaN`), o firmware **não publica** aquela leitura. Intervalo de publicação sugerido: 10 a 30 s (o DHT22 exige cerca de 2 s entre leituras).
+Regras: campos extras são ignorados; payload inválido é registrado em log e descartado, sem derrubar o backend; se a leitura do DHT22 falhar (`NaN`), o firmware **não publica** aquela leitura. Intervalo de publicação: 30 s, configurável no firmware (o DHT22 exige cerca de 2 s entre leituras).
 
-- QoS: 1 (entrega pelo menos uma vez).
-- Tópico de status: `greensync/{deviceId}/status`, payload `{"status": "online"}` ou `{"status": "offline"}`.
+- QoS: os comandos do backend saem em QoS 1 (entrega pelo menos uma vez). As leituras do firmware saem em QoS 0, limitação da biblioteca `PubSubClient`; como chegam a cada 30 s, perder uma leitura é aceitável.
+- Tópico de status: `greensync/{deviceId}/status`, payload `{"status": "online", "fw": "2.1.0"}` ou `{"status": "offline"}` (`fw` é a versão do firmware instalada).
   - O firmware publica `online` ao conectar, com retain.
   - O `offline` é o **Last Will**, publicado pelo broker em desconexão inesperada.
-- Tópico de comandos (backend → WROOM): `greensync/{deviceId}/comandos`. **Implementado no backend; o firmware ainda precisa assinar e executar.**
+- Tópico de comandos (backend → WROOM): `greensync/{deviceId}/comandos`. **Implementado no backend e no firmware do WROOM.**
   - QoS 1, **sem retain** (um comando guardado no broker seria entregue de novo a quem reconectasse depois, e a bomba ligaria sem ninguém pedir).
   - Payload: `{"acao": "regar", "duracao_s": 5, "id": "<idAgendamento>"}`.
 
@@ -351,6 +358,8 @@ Regras: campos extras são ignorados; payload inválido é registrado em log e d
   - O firmware **deve ignorar um `id` repetido**: o QoS 1 pode entregar a mesma mensagem mais de uma vez.
   - O firmware **mantém o próprio tempo máximo de bomba ligada**, independente do `duracao_s` recebido.
   - Depois de regar, o firmware publica `bomba_ligada` no tópico de sensores, como sempre. No backend, `concluida` significa "comando publicado", não "a bomba girou".
+  - Outros comandos neste tópico: `{"acao":"atualizar","alvo":"wroom","id":...,"versao":...,"url":...,"sha256":...}` e `{"acao":"reverter","alvo":"wroom","id":...,"versao":...}` (Seção 8.11).
+- Tópico de progresso do OTA (WROOM → backend): `greensync/{deviceId}/ota`, payload `{"alvo":"wroom","id":...,"estado":"baixando|aplicando|ok|falhou|revertido","versao":...,"erro":...}`; `erro` é um código curto, só em `falhou` e `revertido`.
 
 ## 8.2 Esquema do Firestore (Backend ↔ App)
 
@@ -358,6 +367,8 @@ Regras: campos extras são ignorados; payload inválido é registrado em log e d
 devices/{deviceId}                      (documento)
   status: "online" | "offline"
   last_seen: timestamp
+  fw, fw_s3: versão do firmware instalada (do status MQTT)
+  ota: estado da atualização em curso (tipo, alvo, id, estado, versão)
   leitura_atual: {                      (campo do tipo mapa, dentro do documento)
     ph, umidade_solo, temperatura_ar, umidade_ar, bomba_ligada, updated_at
   }
@@ -370,6 +381,11 @@ devices/{deviceId}                      (documento)
     origem: "voz" | "texto"
     motivo: texto                       (só quando falha ou expira)
     criado_em, atualizado_em: timestamp
+
+firmware/{alvo}                         (documento; alvo = wroom ou s3)
+  versao, url, sha256, notas
+  anterior: registro da versão anterior
+  bloqueadas: versões retiradas
 ```
 
 `updated_at` é carimbado pelo servidor a cada leitura gravada e é a base do frescor dos dados (Seção 8.7). `leitura_atual` é um campo do próprio documento (e não uma subcoleção): o app assina um único documento e recebe status e leitura juntos. A leitura atual e o registro de histórico são gravados no mesmo lote (ou ambos, ou nenhum). Campos ausentes na leitura (ex.: `umidade_ar`) ficam ausentes ou nulos.
@@ -381,10 +397,13 @@ devices/{deviceId}                      (documento)
 - Credenciais do broker, chave de serviço do Firebase, chave do Gemini e `X-API-Key` ficam **fora do controle de versão** (`.env` local; variáveis de ambiente no Render). O `.gitignore` cobre `.env` e arquivos de chave de serviço.
 - Firestore em modo produção: o backend usa o Admin SDK (ignora as regras); as regras para o app serão definidas junto com a frente do aplicativo.
 - Uma chave de serviço exposta deve ser revogada e substituída imediatamente.
+- Atualização de firmware (ADR-030): download só por HTTPS de hosts permitidos (`OTA_HOSTS_PERMITIDOS`, padrão `github.com`), SHA-256 conferido durante a gravação, registro só com `X-Admin-Key`, atualização recusada com a bomba ligada e rollback automático.
+- BLE (ADR-029): a senha do Wi-Fi trafega sem criptografia pelo canal BLE, de alcance curto e usado só durante a configuração; o pareamento com PIN é uma melhoria possível.
+- No firmware, a validação do certificado do broker e do download do OTA está desativada na bancada (`TLS_INSEGURO` e `OTA_TLS_INSEGURO`) até a CA ser configurada.
 
 ## 8.4 Contrato HTTP do assistente (S3 ↔ Backend)
 
-**Implementado e testado no backend. Falta o firmware do S3 implementar o cliente.** Qualquer mudança aqui deve ser avisada às três frentes antes (SRS, 3.5.10).
+**Implementado e testado no backend. O cliente do S3 está em desenvolvimento.** Qualquer mudança aqui deve ser avisada às três frentes antes (SRS, 3.5.10).
 
 ### `POST /audio` — pergunta falada, resposta falada
 
@@ -450,7 +469,7 @@ O backend valida todo pedido de rega antes de agendar. Os valores abaixo são co
 | Atraso máximo | 24 h | `REGA_ATRASO_MAX_S` |
 | Duração máxima | 10 s no código (a demonstração usa 15 s, definida no `.env`) | `REGA_DURACAO_MAX_S` |
 | Duração padrão (a pessoa não disse) | 5 s no código (a demonstração usa 15 s, definida no `.env`) | `REGA_DURACAO_PADRAO_S` |
-| Intervalo mínimo entre regas | 10 min (conta regas pendentes, executando e concluídas) | `REGA_INTERVALO_MIN_S` |
+| Intervalo mínimo entre regas | 10 min no código (30 s na demonstração, definido no `.env`); conta regas pendentes, executando e concluídas | `REGA_INTERVALO_MIN_S` |
 | Tolerância de atraso (reinício do backend) | 5 min | `REGA_TOLERANCIA_S` |
 | Vaso offline ou sem nenhuma leitura | Recusa | — |
 | Solo acima de 80% de umidade | Recusa a rega de agora (e confere de novo na hora de regar) | `SOLO_ENCHARCADO_ACIMA` |
@@ -463,7 +482,7 @@ Outras garantias:
 - **Nunca duplicar:** o status `executando` é gravado, em transação, antes de publicar o comando. Duas tentativas sobre a mesma rega (ex.: duas instâncias durante um deploy) nunca passam as duas. Dois pedidos ao mesmo tempo também não furam o intervalo mínimo (trava no backend).
 - **Reconferência na hora:** no horário marcado, o backend confere de novo se o vaso está online e o solo não está encharcado; se não, marca `falhou` com o motivo e não publica nada.
 - **Frases verdadeiras:** a confirmação e a recusa são escritas pelo backend, com o horário e a duração realmente agendados. Numa rega "de agora", o backend espera o resultado e, se falhar, a planta diz que não conseguiu.
-- O firmware tem seu próprio tempo máximo de bomba ligada (defesa em profundidade).
+- O firmware tem seu próprio tempo máximo de bomba ligada (15 s) e ignora `id` repetido (defesa em profundidade).
 
 **Travas independentes do LLM (ADR-025):**
 - Rega: a fala da pessoa precisa conter uma forma de pedido (rega, regar, regue, molhar, irrigar...). "Regular", "regulamento" e "regada" não valem.
@@ -510,17 +529,33 @@ O assistente não pode falar como se o último valor ainda fosse o de agora (REQ
 
 ## 8.10 Estratégia de testes
 
-- **Automatizados (pytest, 448 execuções):** rodam sem Gemini, Firestore, Redis ou MQTT reais, com fakes; cada teste usa os padrões de `config.py`, independentes do `.env`. Rodam só dentro do Docker: `docker compose run --rm --no-deps backend python -m pytest tests/ -q`.
+- **Automatizados (pytest, 973 execuções):** rodam sem Gemini, Firestore, Redis ou MQTT reais, com fakes; cada teste usa os padrões de `config.py`, independentes do `.env`. Rodam só dentro do Docker: `docker compose run --rm --no-deps backend python -m pytest tests/ -q`.
 - **Prova por reversão:** ao corrigir uma trava de segurança, a mudança é desfeita temporariamente para confirmar que algum teste falha, e só depois restaurada. Assim o teste prova a trava, e não apenas passa.
 - **Manuais (roteiro interno do grupo):** cobrem o que os fakes não provam: Gemini real e voz, Firestore e Redis reais, Mosquitto, e depois o firmware real. Os scripts `tests/manual_*.py` gastam cota do Gemini e ficam fora do pytest.
 - **Plano formal:** o documento `IEEE829_GreenSync_Plano_de_Testes.md` organiza níveis, critérios de aprovação, suspensão, ambiente e responsabilidades, apontando para os requisitos do SRS em vez de repeti-los.
 - **Limite conhecido:** os testes automatizados garantem o texto do prompt e as travas do backend, não a fala do modelo; a integração com o vaso real, o TLS na rede da faculdade e o app só se provam em teste conjunto.
 
+## 8.11 Atualização de firmware (OTA)
+
+- **Registro:** cada versão é publicada como *release* no GitHub (tag `firmware-{alvo}-vX.Y.Z`); uma GitHub Action chama `PUT /firmware/{alvo}` (`X-Admin-Key`) e o backend guarda versão, URL, SHA-256 e a versão anterior em `firmware/{alvo}`. Só aceita `https` e hosts de `OTA_HOSTS_PERMITIDOS`; versão igual à atual dá 409; versão retirada fica em `bloqueadas`.
+- **Disparo:** `POST /dispositivos/{id}/atualizar` (app) publica o comando com versão, URL e hash lidos do registro, nunca do pedido. Recusas: `sem_firmware`, `firmware_invalido`, `sem_dados`, `offline`, `bomba_ligada`, `versao_igual`, `ota_em_curso`. Com `OTA_AUTO=true`, o backend dispara sozinho quando o registro recebe uma versão maior ou quando o vaso conecta com versão menor (semver, no máximo `OTA_AUTO_TENTATIVAS` por versão).
+- **No vaso:** baixa por HTTPS, calcula o SHA-256 enquanto grava na partição inativa (tabela com dois slots), recusa a atualização com a bomba ligada e publica o progresso em `greensync/{deviceId}/ota`.
+- **Confirmação e rollback:** o firmware novo se confirma ao conectar ao MQTT. Sem confirmação em 5 minutos, ou depois de mais de 3 reinícios sem se confirmar, o vaso volta à partição anterior.
+- **Reversão manual:** `POST /dispositivos/{id}/reverter` (`X-Admin-Key`) manda o vaso à versão do registro e bloqueia a revertida; `POST /firmware/{alvo}/retirar` retira a versão atual e restaura a anterior.
+- **Regra de publicação:** a versão do registro precisa ser igual à `FW_VERSION` compilada no mesmo binário.
+
+## 8.12 Configuração de Wi-Fi por BLE
+
+- **Serviço:** nome `GreenSync_BLE`, serviço `4fafc201-1fb5-459e-8fcc-c5c9c331914b`, característica `beb5483e-36e1-4688-b7f5-ea07361b26a8` (escrita e notificação).
+- **Escrita:** `ssid,senha`. **Notificações:** `conectando`, `ok`, `erro:senha`, `erro:rede`, `erro:timeout`.
+- **Quando abre:** sem rede salva ou depois de 4 falhas seguidas de conexão. Não há botão físico.
+- **Persistência:** as credenciais vão para a NVS só depois de uma conexão bem-sucedida.
+
 ---
 
 # 9. Architecture Decisions
 
-Ver documento separado **ADR — Decisões — GreenSync**, que registra as decisões arquiteturais (ADR-001 a ADR-028). Decisões recentes, desta versão do documento:
+Ver documento separado **ADR — Decisões — GreenSync**, que registra as decisões arquiteturais (ADR-001 a ADR-033). Decisões recentes, desta versão do documento:
 
 | ADR | Tema |
 |---|---|
@@ -528,17 +563,22 @@ Ver documento separado **ADR — Decisões — GreenSync**, que registra as deci
 | ADR-015 | Redis sem Celery (revisa a ADR-013) |
 | ADR-016 | Dois microcontroladores: WROOM (sensores) e S3 (voz) (revisa a ADR-001) |
 | ADR-017 | Áudio do S3 por HTTP com `X-API-Key` |
-| ADR-018 | IA na V1 (revisa a ADR-011); Gemini com Groq de reserva |
+| ADR-018 | Gemini com Groq de reserva |
+| ADR-033 | Fases: V1 é o vaso do WROOM, V2 é a voz do S3; sem GPRS (revisa as ADR-011 e ADR-018) |
 | ADR-019 | Hospedagem paga no Render, instância única (revisa a ADR-003) |
 | ADR-020 | Sensores DHT22 e YL-69 (substitui a ADR-008) |
 | ADR-021 | Assistente com personalidade e rega por voz, agenda no Firestore |
-| ADR-022 | Provisionamento de Wi-Fi por portal |
+| ADR-022 | Provisionamento de Wi-Fi por portal (substituída pela ADR-029) |
 | ADR-023 | Display no ESP32-S3, alternando entre rosto e dados dos sensores (resolve a pendência da ADR-016) |
-| ADR-024 | pH simulado na demonstração, combinado com o professor |
+| ADR-024 | pH simulado na demonstração |
 | ADR-025 | Pedido de rega como saída estruturada, validado e confirmado pelo backend (ajusta o item 2 da ADR-021) |
 | ADR-026 | Dados desatualizados e tolerância a falhas do assistente |
 | ADR-027 | pH sempre falado com o valor exato |
 | ADR-028 | Estratégia de testes: fakes, prova por reversão e testes manuais |
+| ADR-029 | Configuração de Wi-Fi por BLE, sem botão físico (substitui a ADR-022) |
+| ADR-030 | Atualização de firmware pela rede (OTA) com GitHub Releases e rollback |
+| ADR-031 | Rega somente por comando; sem irrigação automática no firmware |
+| ADR-032 | Palavra de ativação "Hi ESP" detectada no próprio S3 |
 
 ---
 
@@ -553,17 +593,19 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | Cenário | Estímulo | Resposta esperada |
 |---|---|---|
 | Perda momentânea de Wi-Fi | Rede cai por alguns segundos | Firmware reconecta e retoma publicação MQTT automaticamente |
-| Troca de rede (casa ↔ faculdade) | O vaso é levado para outra rede Wi-Fi | O ESP conecta a uma rede salva ou abre o portal de configuração, sem regravar o firmware |
+| Troca de rede (casa ↔ faculdade) | O vaso é levado para outra rede Wi-Fi | O vaso abre o BLE e o app envia a nova rede, sem regravar o firmware |
 | Backend reinicia com rega agendada | Render reinicia o serviço antes da hora da rega | No startup, o backend recarrega os agendamentos `pendente` do Firestore; os vencidos além da tolerância viram `expirada` |
 | Pedido de rega excessivo | Usuário pede rega repetida ou muito longa | O backend recusa pelas regras de limite, e o firmware ainda aplica o tempo máximo de bomba |
 | Excesso de perguntas | Chave de API usada além do limite | O backend recusa novas perguntas até o limite liberar |
-| Leitura ruidosa do sensor de umidade | Valor oscila perto do limiar de irrigação | Histerese evita ligar/desligar repetidamente a bomba |
+| Comando de rega repetido | O QoS 1 entrega o mesmo comando duas vezes | O firmware ignora o `id` repetido e a bomba liga uma vez |
 | Leitura inválida do DHT22 | O sensor falha e devolve `NaN` | O firmware não publica; se algo inválido chegar, o backend descarta |
 | Instância duplicada do backend | Duas instâncias assinam o mesmo tópico | Evitado por configuração: instância única, sem autoscaling |
 | Pergunta por voz feita ao assistente | Usuário pergunta "como ela tá?" | O display do S3 troca da carinha para os dados dos sensores relevantes, e volta à carinha ao final da resposta |
 | Vaso para de enviar dados | Sem leitura nova há mais de 120 s, ou Last Will recebido | O assistente avisa que são os últimos dados e há quanto tempo, sem dizer que está bem agora; `X-Dados.atuais` vem `false` |
 | Pedido de rega com o vaso offline | Usuário pede "rega agora" e o vaso está offline | O backend recusa e a planta diz que não consegue regar porque o vaso está desconectado; nada é publicado |
 | Modelo principal do Gemini lento ou fora do ar | Timeout ou 503 | O backend tenta o modelo reserva; só se todos falharem a rota responde 502 |
+| Atualização de firmware com binário ruim | Hash errado, ou firmware novo que não conecta | O vaso recusa o binário com hash errado; se o novo não se confirmar, volta sozinho à versão anterior |
+| Rede Wi-Fi com senha errada | Usuário digita a senha errada no app | O vaso notifica `erro:senha` e mantém a rede salva anterior |
 
 ---
 
@@ -575,23 +617,25 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | Sensor de solo resistivo (YL-69) | Corrói com o tempo e exige calibração; a leitura bruta é invertida | Calibração seco/molhado no firmware; alimentar o sensor só durante a leitura; avaliar sensor capacitivo |
 | Vedação física do vaso | Separação entre câmara eletrônica seca e substrato úmido é um desafio real de fabricação | Prototipar e testar a vedação antes da montagem final |
 | Bomba e alimentação | Bomba e dois ESPs na mesma fonte de 5V; sem diodo de roda-livre e capacitor de desacoplamento, a bomba pode reiniciar o ESP ou queimar o transistor | Diodo de roda-livre, capacitor de desacoplamento e fonte com folga (ex.: 5V/3A) |
-| Escopo da V1 maior | A IA e a rega por voz sobem para a V1; dois firmwares, áudio e cadeia de IA | Construir em camadas; validar o assistente em texto antes do hardware; manter a voz como camada sobre a irrigação base |
+| Escopo da V2 maior | Dois firmwares, áudio e cadeia de IA | Construir em camadas; validar o assistente em texto antes do hardware; a voz é uma camada sobre a V1, que funciona sozinha |
 | Latência da voz | Chamadas ao Gemini e ao TTS somadas podem passar de alguns segundos | Medir cedo; respostas curtas; reduzir chamadas (áudio direto no Gemini) |
 | Memória do Render (512 MB) | API, assinante MQTT, IA e Redis local disputam memória | Um processo só; monitorar; gatilhos de migração na Seção 7.2 |
-| Plano do EMQX Cloud | Limites de conexões e mensagens do plano gratuito ainda não conferidos | Conferir antes de criar o cluster; Mosquitto local para desenvolvimento |
+| Plano do EMQX Cloud | Limites de conexões e mensagens do plano serverless | Acompanhar o uso; Mosquitto local para desenvolvimento |
 | Firewall da faculdade | Redes de faculdade podem bloquear a porta 8883 | Testar na rede real; alternativa de MQTT sobre WebSocket seguro na 443 |
-| Cotas do Gemini | Limites do plano gratuito (incluindo áudio) ainda não conferidos | Conferir; isolar a chamada em `responder(audio, leitura)` para trocar de provedor |
-| Contratos ainda não validados com o firmware | O backend já implementa o contrato MQTT, o tópico de comandos e o contrato HTTP de áudio (Seções 8.1 e 8.4); falta o firmware (WROOM e S3) confirmar e testar | Testar com o hardware, em grupo; qualquer mudança de contrato é avisada antes |
-| Tamanho da resposta de áudio no S3 | A voz chega em WAV de 24 kHz, cerca de 350 a 380 KB para 8 s | Confirmar a memória (PSRAM) do S3 ou tocar em streaming; o servidor pode gerar em 16 kHz |
+| Cotas do Gemini | Limites do plano gratuito (incluindo áudio) | Acompanhar o uso; isolar a chamada em `responder(audio, leitura)` para trocar de provedor |
+| Contrato de áudio ainda não validado com o S3 | O contrato MQTT está validado com o WROOM; o cliente HTTP de áudio do S3 está em desenvolvimento (Seção 8.4) | Testar o S3 com o backend; qualquer mudança de contrato é avisada antes |
+| Hardware do S3 | Montagem instável (fios soltos, mau contato no microfone) em protoboard | Soldar as ligações, usar fios curtos e testar cada módulo isoladamente |
+| TLS sem validação no firmware | Na bancada, o certificado do broker e o do download do OTA não são validados | Configurar a CA no firmware e desligar `TLS_INSEGURO` e `OTA_TLS_INSEGURO` antes da entrega final |
+| Senha do Wi-Fi sem criptografia no BLE | A credencial trafega em claro durante a configuração | Alcance curto e janela curta; pareamento com PIN como melhoria |
+| Alto-falante de 1 W | Tom contínuo em volume alto pode queimar a bobina | Limitar o volume do firmware; a voz tem picos curtos |
+| Tamanho da resposta de áudio no S3 | A voz chega em WAV de 24 kHz, cerca de 350 a 380 KB para 8 s | O S3 tem 8 MB de PSRAM, suficientes para guardar a resposta; se faltar memória, tocar em streaming ou gerar a voz em 16 kHz |
 | Modelo principal do Gemini instável | Em testes, estourou o prazo ou deu 503 com frequência | Modelo reserva automático (Seção 8.8); trocar a ordem dos modelos no `.env` |
 | pH simulado | O pH da demonstração não é medido (ADR-024) | Dizer isso na apresentação; trocar pela sonda real mexe só no firmware |
-| Precedência entre irrigação automática e rega agendada | Ainda não definida (SRS, REQ-FUNC-002) | Definir com o firmware; o backend já recusa a rega de agora com a bomba ligada ou o solo encharcado |
-| Redis e a expectativa do professor | O uso definido (contexto, limite) pode não ser o esperado | Confirmar com o professor (fila, cache ou ambos) |
+| Rega depende do backend | Sem irrigação automática no firmware (ADR-031), a planta só é regada se backend, broker e rede estiverem no ar | Agendar regas com folga e manter o backend sempre ativo (ADR-019); uma regra local com histerese é uma evolução possível |
 | Chave de API única | Quem tem a chave consulta e rega qualquer `deviceId`; a chave fica embutida no firmware do S3 | Aceito para o projeto; uma chave por vaso mudaria o contrato. Trocar a chave se vazar |
 | Recarga das regas na subida sem nova tentativa | Se o Firestore estiver fora quando o backend sobe, as regas pendentes só voltam no próximo reinício e podem expirar (tolerância de 5 min) | Raro; repetir a recarga em segundo plano é melhoria futura |
 | Regas com gravação incerta | Se o Firestore cair logo depois de o comando sair, a rega pode ficar `executando` até o próximo reinício | Continua contando no intervalo mínimo; no reinício vira `falhou` e nunca repete |
-| Testes com fakes não provam o mundo real | A suíte (448 execuções) usa fakes; o Gemini, o Firestore, a bomba e a rede da faculdade só se provam em teste real | Testes manuais do grupo e Plano de Testes; testar com o firmware em grupo antes da demonstração |
-| Prazo | Prazos da V1 e da V2 ainda não definidos com a IA na V1 | Confirmar com o professor |
+| Testes com fakes não provam o mundo real | A suíte (973 execuções) usa fakes; o Gemini, o Firestore, a bomba e a rede da faculdade só se provam em teste real | Testes manuais do grupo e Plano de Testes; testar com o firmware em grupo antes da demonstração |
 
 ---
 
@@ -609,9 +653,11 @@ Ver Seção 3.3 do documento SRS — Requisitos para os requisitos de qualidade 
 | Function calling | Recurso em que o LLM devolve um pedido de ação estruturado (ex.: agendar rega) em vez de texto livre; quem executa a ação é o backend |
 | DHT22 | Sensor digital de temperatura e umidade do ar |
 | YL-69 | Sensor resistivo de umidade do solo, de duas hastes; exige calibração |
-| Provisionamento de Wi-Fi | Configuração da rede do ESP sem regravar o firmware (portal de configuração) |
-| Histerese | Margem de segurança que evita ligar/desligar repetidamente a bomba quando o valor oscila perto do limiar |
+| Provisionamento de Wi-Fi | Configuração da rede do ESP sem regravar o firmware (por BLE) |
+| BLE | Bluetooth Low Energy; o app o usa para enviar a rede Wi-Fi ao vaso |
+| OTA | Atualização de firmware pela rede (Seção 8.11) |
+| Rollback | Volta automática do vaso à versão anterior do firmware quando a nova não se confirma |
 | Display OLED (SSD1306) | Tela do ESP32-S3 que mostra, por padrão, a carinha da planta e troca para os dados dos sensores durante uma resposta de voz (ADR-023) |
 | Frescor (dos dados) | Se a leitura é recente o bastante para ser tratada como "agora" (Seção 8.7) |
-| V1 | Primeira fase de entrega: hardware, sensores, irrigação, sincronização de dados, app e assistente de voz |
-| V2 | Segunda fase de entrega: conectividade GPRS |
+| V1 | Primeira fase de entrega: vaso do ESP32-WROOM (sensores, bomba, sincronização de dados, app, BLE e OTA) |
+| V2 | Segunda fase de entrega: voz e display no ESP32-S3 |

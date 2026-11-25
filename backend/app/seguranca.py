@@ -8,6 +8,13 @@ from app.config import settings
 DEVICE_ID_PADRAO = r"^[A-Za-z0-9_-]{1,64}$"
 
 
+def admin_chave_valida(recebida: str) -> bool:
+    """Compara a X-Admin-Key em tempo constante. Vazia no .env = sempre False (rota desligada)."""
+    if not settings.admin_api_key:
+        return False
+    return secrets.compare_digest(recebida.encode(), settings.admin_api_key.encode())
+
+
 def chave_valida(recebida: str) -> bool:
     """Compara a X-API-Key em tempo constante. Vazia no .env = rota aberta (dev)."""
     if not settings.api_key:

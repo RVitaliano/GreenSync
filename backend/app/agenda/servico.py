@@ -48,6 +48,36 @@ async def _regar(acao, fala_usuario, device_id, leitura, estado, origem) -> dict
         log.warning("[%s] o modelo propôs uma rega que a pessoa não pediu: ignorada", device_id)
         return {"fala": fala.NAO_ENTENDI, "resultado": "ignorada", "id": None}
 
+    resposta, _ = await _agendar_rega(acao, device_id, leitura, estado, origem)
+    return resposta
+
+
+async def regar_agora(device_id: str, duracao_s: int | None, leitura: dict | None,
+                      estado: dict, origem: str = "app") -> dict:
+    """Rega manual (botão do app): mesmas regras e travas da rega por voz, sem a trava de palavra.
+
+    Devolve {"resultado": "agendada" | "recusada" | "falhou", "id", "motivo"}. `motivo` é o
+    código da recusa, o texto da falha ou None. Erros inesperados (Firestore, MQTT) sobem
+    para quem chamou decidir o que responder.
+    """
+    acao = {"daqui_a_s": None, "as_hora": None, "duracao_s": duracao_s}
+    resposta, motivo_falha = await _agendar_rega(acao, device_id, leitura, estado, origem)
+    resultado = resposta["resultado"]
+    if resultado == "recusada":
+        motivo = resposta.get("motivo")
+    elif resultado == "falhou":
+        motivo = motivo_falha or "erro interno"
+    else:
+        motivo = None
+    return {"resultado": resultado, "id": resposta["id"], "motivo": motivo}
+
+
+async def _agendar_rega(acao, device_id, leitura, estado, origem) -> tuple[dict, str | None]:
+    """Valida, agenda e (se for "agora") espera o resultado. Devolve (resposta, motivo_da_falha).
+
+    `resposta` tem o formato público de tratar_acao; o motivo da falha (segundo valor) só é
+    preenchido quando a rega de agora falhou na hora de executar.
+    """
     async with agendador.trava:
         try:
             pedido = resolver_pedido(acao, agendador.agora())
@@ -55,17 +85,19 @@ async def _regar(acao, fala_usuario, device_id, leitura, estado, origem) -> dict
             checar_regras(pedido, leitura, estado, vizinhos)
         except Recusa as r:
             log.info("[%s] rega recusada: %s", device_id, r.codigo)
-            return {"fala": r.fala, "resultado": "recusada", "motivo": r.codigo, "id": None}
+            return {"fala": r.fala, "resultado": "recusada", "motivo": r.codigo, "id": None}, None
         ag_id = await agendador.agendar(device_id, pedido, origem)
 
     texto = fala.confirmacao(pedido.quando, pedido.atraso_s, pedido.duracao_s)
     resultado = "agendada"
+    motivo_falha = None
     if pedido.atraso_s == 0:
         # Rega "de agora": espera o resultado real para não prometer o que não aconteceu.
         final = await agendador.aguardar(device_id, ag_id)
         if final and final[0] == "falhou":
-            texto, resultado = fala.falha_na_hora(final[1] or "erro interno"), "falhou"
-    return {"fala": texto, "resultado": resultado, "id": ag_id}
+            motivo_falha = final[1] or "erro interno"
+            texto, resultado = fala.falha_na_hora(motivo_falha), "falhou"
+    return {"fala": texto, "resultado": resultado, "id": ag_id}, motivo_falha
 
 
 async def _cancelar(fala_usuario: str, device_id: str) -> dict:

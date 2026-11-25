@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     mqtt_use_tls: bool = False
     mqtt_topic_sensores: str = "greensync/+/sensores"
     mqtt_topic_status: str = "greensync/+/status"
+    mqtt_topic_ota: str = "greensync/+/ota"      # progresso da atualização enviado pelo vaso
 
     # Firebase
     firebase_credentials_path: str = "serviceAccountKey.json"
@@ -42,7 +43,14 @@ class Settings(BaseSettings):
 
     # --- Áudio recebido do S3 / celular (POST /audio) ---
     audio_max_bytes: int = 1_000_000   # ~30 s de WAV 16 kHz mono 16 bits
-    audio_max_s: float = 15.0          # pergunta mais longa que isso é recusada
+    audio_max_s: float = 15.0         # pergunta mais longa que isso é recusada
+
+    # --- Palavra de ativação no POST /audio (desligada por padrão: nada muda) ---
+    # Ligada, o backend só responde se a fala começar com a palavra; senão descarta (204) sem voz.
+    wake_word_ativa: bool = False
+    wake_word: str = "greensync"
+    # Falas por minuto (por chave de API) que podem chegar ao Gemini com a palavra ligada.
+    wake_limite_clipes_por_min: int = 20
 
     # --- Rega por voz e agendamento (REQ-FUNC-011 e REQ-FUNC-012) ---
     # Tópico dos comandos para o vaso; {device_id} é trocado pelo id do dispositivo.
@@ -77,6 +85,23 @@ class Settings(BaseSettings):
 
     # --- API HTTP ---
     api_key: str = ""  # se vazia, a rota fica aberta (só para desenvolvimento)
+
+    # --- OTA (registro de firmware) ---
+    # Chave da rota de administração (X-Admin-Key). Aqui o padrão é FECHADO: vazia = rota desligada (403).
+    admin_api_key: str = ""
+    # Hosts aceitos nas URLs dos binários, separados por vírgula (comparação exata, sem subdomínios).
+    ota_hosts_permitidos: str = "github.com"
+    # Atualização "em curso" (solicitada/baixando/aplicando) parada há mais que isso é considerada
+    # travada, e uma nova pode ser pedida.
+    ota_timeout_s: int = 600
+    # OTA automático: ao registrar uma versão nova, ou quando um vaso fica online com versão menor,
+    # o backend manda o comando "atualizar" sozinho. Desligado por padrão.
+    ota_auto: bool = False
+    # Quantas vezes o automático tenta a MESMA versão em um vaso antes de desistir.
+    ota_auto_tentativas: int = 2
+    # Vaso recusado por sem_dados ou bomba_ligada é verificado de novo nas próximas leituras de
+    # sensores dele, no máximo isto de vezes.
+    ota_auto_retentativas: int = 3
 
     # --- Redis e limite de perguntas (REQ-FUNC-015) ---
     # Ex.: redis://redis:6379/0. Vazia = sem Redis, e o limite fica DESLIGADO.

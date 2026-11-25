@@ -66,9 +66,15 @@ def _save_reading_sync(device_id: str, reading: SensorReading) -> None:
     batch.commit()
 
 
-def _save_status_sync(device_id: str, status: str) -> None:
+def _save_status_sync(device_id: str, status: str, fw: str | None = None, fw_s3: str | None = None) -> None:
     db = init_firebase()
-    db.collection("devices").document(device_id).set({"status": status}, merge=True)
+    dados = {"status": status}
+    # Só grava a versão quando ela vem: o Last Will (sem fw) não apaga a última conhecida.
+    if fw:
+        dados["fw"] = fw
+    if fw_s3:
+        dados["fw_s3"] = fw_s3
+    db.collection("devices").document(device_id).set(dados, merge=True)
 
 
 def _read_current_sync(device_id: str) -> dict | None:
@@ -95,8 +101,8 @@ async def save_reading(device_id: str, reading: SensorReading) -> None:
     logger.info("[%s] leitura gravada no Firestore", device_id)
 
 
-async def save_status(device_id: str, status: str) -> None:
-    await asyncio.to_thread(_save_status_sync, device_id, status)
+async def save_status(device_id: str, status: str, fw: str | None = None, fw_s3: str | None = None) -> None:
+    await asyncio.to_thread(_save_status_sync, device_id, status, fw, fw_s3)
     logger.info("[%s] status '%s' gravado no Firestore", device_id, status)
 
 

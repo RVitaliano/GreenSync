@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Tecnologias Utilizadas - GreenSync</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="cabecalho-amarelo">
+        <div class="linha-superior">
+            <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
+            <div class="titulo-branco">PROJETO GREENSYNC</div>
+        </div>
+        <nav class="menu-branco">
+            <a href="index.html">Home</a>
+            <a href="plataforma.html">Plataforma</a>
+            <a href="dispositivo.html">Dispositivo</a>
+            <a href="aplicativo.html">Aplicativo</a>
+            <a href="tecnologias.html" class="ativo">Tecnologias</a>
+        </nav>
+    </header>
+
+    <main class="conteudo">
+        <section>
+            <h2>1. Aplicativo Mobile</h2>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Característica</th>
+                        <th>Informação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Linguagem de programação</td>
+                        <td><strong>Dart</strong>, linguagem do Flutter, usada para toda a interface e a lógica do aplicativo.</td>
+                    </tr>
+                    <tr>
+                        <td>Framework / SDK</td>
+                        <td><strong>Flutter</strong> (multiplataforma Android/iOS), com integração ao Firebase via <strong>FlutterFire</strong> e compilação Android voltada ao SDK 37+.</td>
+                    </tr>
+                    <tr>
+                        <td>IDE / Ambiente</td>
+                        <td><strong>Visual Studio Code</strong>; testes em aparelho físico Android com build de desenvolvimento e variáveis de ambiente via <code>--dart-define</code>.</td>
+                    </tr>
+                    <tr>
+                        <td>Bibliotecas / Plugins</td>
+                        <td><code>firebase_core</code>, <code>cloud_firestore</code> (leitura em tempo real e histórico), <code>fl_chart</code> (gráficos históricos), <code>flutter_blue_plus</code> (BLE) e <code>permission_handler</code> (permissões de Bluetooth/localização).</td>
+                    </tr>
+                    <tr>
+                        <td>Integração com o projeto</td>
+                        <td>Lê a coleção <code>devices</code> no Firestore por listeners em tempo real (leitura atual, histórico e status online/offline), envia pedidos de rega e agendamentos ao backend por HTTP e envia credenciais Wi-Fi ao vaso via Bluetooth (BLE).</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>2. Sistema Embarcado / Firmware</h2>
+            <p>O vaso utiliza dois microcontroladores com responsabilidades separadas.</p>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Característica</th>
+                        <th>Informação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Placas e microcontroladores</td>
+                        <td><strong>ESP32-WROOM-32</strong> (sensores, bomba, MQTT, BLE e OTA) e <strong>Seeed Studio XIAO ESP32-S3</strong> (voz: microfone, alto-falante e display OLED).</td>
+                    </tr>
+                    <tr>
+                        <td>Linguagem de programação</td>
+                        <td><strong>C++</strong> (Arduino, com padrão <code>-std=gnu++17</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>IDE e Framework / SDK</td>
+                        <td><strong>VS Code</strong> com <strong>PlatformIO</strong> (Core 6.2.0, Home 3.4.4) e framework <strong>Arduino-ESP32</strong> (plataforma <code>espressif32</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>Sistema Operacional / RTOS</td>
+                        <td><strong>FreeRTOS</strong>, nativo do Arduino-ESP32 sobre o ESP-IDF.</td>
+                    </tr>
+                    <tr>
+                        <td>Bibliotecas e recursos principais</td>
+                        <td>
+                            <strong>WROOM:</strong> <code>WiFiClientSecure</code> (TLS), <code>PubSubClient</code> (MQTT), <code>ArduinoJson 7</code>, <code>DHT sensor library</code> / <code>Adafruit Unified Sensor</code> (DHT22), leitura analógica do YL-69 (ADC1), relé de 2 canais para a bomba, <code>NimBLE-Arduino 2</code> (BLE), OTA com SHA-256, partições <code>min_spiffs.csv</code> (dois slots) e rollback automático. O pH é simulado (ADR-024).<br><br>
+                            <strong>S3:</strong> I2S (microfone INMP441 e amplificador MAX98357), <code>U8g2</code> (display OLED SSD1306), ativação por voz local (ESP-SR / "Hi ESP") e cliente HTTP para o backend.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>3. Plataforma IoT / Backend / Nuvem</h2>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Característica</th>
+                        <th>Informação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Local de hospedagem</td>
+                        <td>Provedor cloud <strong>Render</strong> (serviço web, instância única, sempre ativo, com health check em <code>/health</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>Linguagem e framework</td>
+                        <td><strong>Python 3.12</strong> (imagem <code>python:3.12-slim</code>) com <strong>FastAPI</strong> e <strong>uvicorn</strong>; concorrência com <code>async</code>/<code>await</code> em processo único e cliente MQTT assíncrono (<code>aiomqtt</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>Serviços e produtos</td>
+                        <td><strong>EMQX Serverless</strong> (broker MQTT), <strong>Firebase Firestore</strong> (região <code>southamerica-east1</code>) com Firebase Admin SDK, <strong>Redis</strong> (Render Key Value — limite de perguntas e contexto curto da conversa), <strong>Google Gemini</strong> (<code>google-genai</code> — entendimento de texto/áudio e TTS) e <strong>GitHub</strong> (código, releases do firmware e GitHub Actions).</td>
+                    </tr>
+                    <tr>
+                        <td>Implantação e orquestração</td>
+                        <td><strong>Docker</strong>: mesma imagem roda no Render (deploy automático via branch <code>main</code>) e localmente via <strong>Docker Compose</strong> (backend, Mosquitto e Redis). Sem Kubernetes.</td>
+                    </tr>
+                    <tr>
+                        <td>Persistência e administração</td>
+                        <td>Firestore (<code>devices/{id}</code>, <code>historico</code>, <code>agendamentos</code> e <code>firmware/{alvo}</code>). API protegida com <code>X-API-Key</code> (usuário) e <code>X-Admin-Key</code> (administração/OTA). Credenciais em variáveis de ambiente e Secret File fora do Git. Suíte com <strong>973 testes automatizados</strong> em <code>pytest</code>.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>4. Comunicação e Integração</h2>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Característica</th>
+                        <th>Informação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Protocolos utilizados</td>
+                        <td><strong>MQTT</strong> (vaso ↔ backend: leituras, status, comandos e progresso de OTA), <strong>HTTP/HTTPS REST</strong> (app e S3 ↔ backend; áudio do assistente), <strong>BLE</strong> (configuração de Wi-Fi do vaso) e <strong>Firestore SDK</strong> em tempo real (backend ↔ app).</td>
+                    </tr>
+                    <tr>
+                        <td>Broker / Gateway / Servidor</td>
+                        <td><strong>EMQX Serverless</strong> (broker gerenciado, porta 8883); <strong>Mosquitto</strong> apenas no ambiente local.</td>
+                    </tr>
+                    <tr>
+                        <td>Formato dos dados</td>
+                        <td><strong>JSON</strong> nas mensagens MQTT, documentos Firestore e cabeçalhos auxiliares; <strong>WAV</strong> (16 kHz, 16 bits, mono) para áudio de entrada e <strong>WAV</strong> (24 kHz) para resposta falada.</td>
+                    </tr>
+                    <tr>
+                        <td>Segurança de comunicação</td>
+                        <td>MQTT sobre TLS com usuário e senha (um usuário por papel); endpoints HTTP com <code>X-API-Key</code>/<code>X-Admin-Key</code> em comparação de tempo constante e limite de 10 perguntas por 60 s no Redis; OTA exclusivamente via HTTPS de <code>github.com</code> com verificação SHA-256. <em>Pendente: validação do certificado CA no firmware e ACL por tópico no EMQX.</em></td>
+                    </tr>
+                    <tr>
+                        <td>Fluxo entre camadas</td>
+                        <td>Vaso (WROOM) → MQTT/TLS → EMQX → Backend (FastAPI) → Firestore → App Flutter. Comandos de rega seguem o caminho inverso (App → Backend → MQTT → Vaso). Voz: S3 → HTTPS <code>POST /audio</code> → Backend → Gemini → áudio de resposta ao S3.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>5. Case / Invólucro do Produto</h2>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Característica</th>
+                        <th>Informação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Software de modelagem 3D</td>
+                        <td><strong>OpenSCAD</strong> (modelagem paramétrica por código), com fatiamento no <strong>Anycubic Slicer Next</strong>.</td>
+                    </tr>
+                    <tr>
+                        <td>Formato dos arquivos</td>
+                        <td><strong>SCAD</strong> (fonte paramétrica), <strong>STL</strong> (malha exportada) e <strong>3MF / G-code</strong> (fatiamento).</td>
+                    </tr>
+                    <tr>
+                        <td>Processo de fabricação</td>
+                        <td><strong>Impressão 3D FDM</strong> realizada na impressora <strong>Anycubic Kobra 3 V2</strong>.</td>
+                    </tr>
+                    <tr>
+                        <td>Material e parâmetros</td>
+                        <td>Filamento <strong>PLA ou PETG</strong>; altura de camada de <strong>0,2 mm</strong>, preenchimento de <strong>30%</strong> com padrão <strong>Giroide</strong> e <strong>suportes tipo árvore (Tree)</strong> para integridade das travas.</td>
+                    </tr>
+                    <tr>
+                        <td>Integração mecânica</td>
+                        <td>Estrutura de <strong>120 mm</strong> com divisórias internas e presilha reforçada (8 mm de espessura × 40 mm de largura). Acomoda os dois ESP32, protoboards, módulo relé de 2 canais, bomba d'água e alimentação de 5 V; possui encaixes dedicados para o sensor DHT22 no topo da tampa, microfone INMP441 e display OLED SSD1306, além da passagem da sonda YL-69 para o solo.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+</body>
+</html>

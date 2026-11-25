@@ -6,41 +6,78 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-    <!-- Cabeçalho no padrão da imagem -->
     <header class="cabecalho-amarelo">
         <div class="linha-superior">
             <img src="logo-planta.png" alt="Logo GreenSync" class="logo">
             <div class="titulo-branco">PROJETO GREENSYNC</div>
         </div>
         <nav class="menu-branco">
-            <a href="index.html">Home</a>
+            <a href="index.html" class="ativo">Home</a>
             <a href="plataforma.html">Plataforma</a>
             <a href="dispositivo.html">Dispositivo</a>
             <a href="aplicativo.html">Aplicativo</a>
+            <a href="tecnologias.html">Tecnologias</a>
         </nav>
     </header>
 
-    <!-- Conteúdo da página -->
-<main class="conteudo">
-        <!-- Banner Principal -->
+    <main class="conteudo">
         <img src="banner projeto.jpeg" alt="Banner GreenSync" style="width: 100%; border-radius: 8px; margin-bottom: 20px;">
-        
+
         <section>
-            <h2>Visão Geral (Estado Atual)</h2>
-            <p>O GreenSync é um projeto de vaso inteligente projetado para monitorar dados vitais da planta e automatizar a irrigação. Na etapa atual de desenvolvimento (N1), o protótipo utiliza um ESP32-WROOM para ler sensores de temperatura/umidade do ar (DHT22) e umidade do solo (YL-69), simulando a irrigação e publicando os dados na nuvem via MQTT.</p>
-            <p>Para as próximas fases, o projeto integrará um segundo microcontrolador (ESP32-S3) com display OLED e microfone. Isso habilitará um assistente de voz com personalidade própria (via Google Gemini) capaz de interagir com o usuário e agendar regas, além de um portal Wi-Fi para configuração dinâmica de rede.</p>
+            <h2>Visão Geral</h2>
+            <p>O <strong>GreenSync</strong> é um vaso inteligente que monitora pH do solo, umidade do solo, temperatura e umidade do ar, rega a planta por comando (aplicativo, voz ou agenda) e sincroniza os dados em tempo real com um aplicativo mobile. Projeto acadêmico do <strong>Grupo GreenSync</strong> (Faculdade Nova Roma), desenvolvido por 3 integrantes divididos nas frentes de hardware/firmware, backend e aplicativo.</p>
+            <p>O sistema utiliza dois microcontroladores: um <strong>ESP32-WROOM</strong> (sensores, bomba, MQTT, BLE e OTA) e um <strong>Seeed XIAO ESP32-S3</strong> (voz e display, via HTTP). Toda a lógica de negócio — validação, persistência, IA (Google Gemini), agendamento de regas e controle de atualizações — fica centralizada no backend, enquanto o firmware aplica limites próprios de segurança.</p>
         </section>
-        
+
         <section>
             <h2>Fases do Projeto</h2>
             <ul>
-                <li><strong>Fase Atual (N1):</strong> Leitura base de sensores (DHT22 e YL-69), acionamento de hardware (simulado via servomotor/relé), comunicação MQTT com broker EMQX e persistência básica.</li>
-                <li><strong>Próximos Passos (Integração IA):</strong> Implementação do ESP32-S3 para áudio, integração com sensor de pH e bomba d'água real, hospedagem do backend em servidor dedicado (Render), display OLED interativo e portal de configuração Wi-Fi.</li>
-                <li><strong>V2 (Expansão):</strong> Conectividade celular via módulo GPRS no ESP32-WROOM, tornando o vaso totalmente independente de redes locais.</li>
+                <li><strong>V1:</strong> Vaso do ESP32-WROOM completo — sensores (DHT22, YL-69 e pH simulado), bomba acionada por comando validado, sincronização em tempo real (Wi-Fi → MQTT → Backend → Firebase), aplicativo Flutter, configuração de Wi-Fi via Bluetooth (BLE) e atualização de firmware pela rede (OTA com rollback).</li>
+                <li><strong>V2:</strong> Integração do ESP32-S3 com microfone, alto-falante, palavra de ativação local ("Hi ESP") e display OLED, habilitando o assistente que responde como a própria planta e agenda regas por comando de voz.</li>
             </ul>
         </section>
-    </main>
 
+        <section>
+            <h2>Estado Atual</h2>
+            <table class="tabela-tech">
+                <thead>
+                    <tr>
+                        <th>Módulo</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Backend (MQTT, Firestore, Redis)</td>
+                        <td><span class="badge badge-ok">Implementado (Produção no Render)</span></td>
+                    </tr>
+                    <tr>
+                        <td>Backend (IA <code>/perguntar</code>, <code>/audio</code>, agenda e comandos)</td>
+                        <td><span class="badge badge-ok">Implementado</span></td>
+                    </tr>
+                    <tr>
+                        <td>Backend (OTA: registro, atualizar, reverter e OTA auto)</td>
+                        <td><span class="badge badge-ok">Implementado</span></td>
+                    </tr>
+                    <tr>
+                        <td>Firmware WROOM (DHT22, YL-69, bomba, MQTT/TLS, BLE, OTA)</td>
+                        <td><span class="badge badge-ok">Implementado e testado em bancada (v2.1.0)</span></td>
+                    </tr>
+                    <tr>
+                        <td>App Mobile (Tempo real, histórico, BLE)</td>
+                        <td><span class="badge badge-ok">Implementado (BLE em teste no Android)</span></td>
+                    </tr>
+                    <tr>
+                        <td>Firmware S3 (Voz, display, "Hi ESP")</td>
+                        <td><span class="badge badge-dev">Em desenvolvimento (testes por módulo)</span></td>
+                    </tr>
+                    <tr>
+                        <td>Teste ponta a ponta com vaso completo</td>
+                        <td><span class="badge badge-dev">Em andamento</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
 </body>
 </html>
