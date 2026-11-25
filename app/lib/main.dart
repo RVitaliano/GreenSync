@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -6,6 +7,12 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'firebase_options.dart';
+import 'api.dart';
+import 'mensagens.dart';
+import 'ota_screen.dart';
+import 'snack.dart';
+import 'status_vaso.dart';
+import 'util_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,58 +56,199 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final String serviceUuid = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   final String charUuid = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-  Future<void> pedirPermissoes() async {
-    await [
+  Future<Map<Permission, PermissionStatus>> pedirPermissoes() async {
+    return [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.location,
     ].request();
   }
 
-  void enviarWiFiViaBLE() async {
-    if (ssidController.text.isEmpty || passwordController.text.isEmpty) {
+  /// true só se o resultado do pedido de permissões mostra Bluetooth (scan ou connect) NÃO concedido.
+  /// Sem resultado (o próprio pedido falhou) devolve false: aí vale a mensagem de erro de sempre.
+  bool _semPermissaoBluetooth(Map<Permission, PermissionStatus>? permissoes) {
+    if (permissoes == null) return false;
+    return !(permissoes[Permission.bluetoothScan]?.isGranted ?? false) ||
+        !(permissoes[Permission.bluetoothConnect]?.isGranted ?? false);
+  }
+
+  // ------------------------------------------------------------ Wi-Fi (BLE) ----
+
+  bool _bleOcupado = false; // impede duas conexões ao mesmo tempo
+
+  void _statusBle(String texto) {
+    if (mounted) setState(() { statusBluetooth = texto; });
+  }
+
+  /// Procura "GreenSync_BLE" por até 5 s. A escuta é cancelada ao achar o vaso ou ao fim do tempo.
+  Future<BluetoothDevice?> _procurarVaso() async {
+    final achou = Completer<BluetoothDevice?>();
+    final escuta = FlutterBluePlus.onScanResults.listen((resultados) {
+      for (final r in resultados) {
+        if (r.device.platformName == "GreenSync_BLE" || r.advertisementData.advName == "GreenSync_BLE") {
+          if (!achou.isCompleted) achou.complete(r.device);
+          break;
+        }
+      }
+    });
+    try {
+      unawaited(FlutterBluePlus.startScan(timeout: const Duration(seconds: 5)).catchError((Object e) {
+        if (!achou.isCompleted) achou.completeError(e);
+      }));
+      return await achou.future.timeout(const Duration(milliseconds: 5500), onTimeout: () => null);
+    } finally {
+      await escuta.cancel();
+      try { await FlutterBluePlus.stopScan(); } catch (_) {}
+    }
+  }
+
+  Future<void> enviarWiFiViaBLE() async {
+    if (_bleOcupado) return;
+    final erroWifi = validarCredenciaisWifi(ssidController.text, passwordController.text);
+    if (erroWifi != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preencha o SSID e a Senha!')),
+        SnackBar(content: Text(erroWifi)),
       );
       return;
     }
 
-    await pedirPermissoes();
-    setState(() { statusBluetooth = "Procurando ESP32..."; });
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
+    _bleOcupado = true;
+    BluetoothDevice? vaso;
+    StreamSubscription<List<int>>? notificacoes;
+    Map<Permission, PermissionStatus>? permissoes;
+    try {
+      // O resultado NÃO bloqueia o fluxo: só serve para escolher a mensagem se algo der errado.
+      permissoes = await pedirPermissoes();
+      _statusBle("Procurando ESP32...");
+      vaso = await _procurarVaso();
+      if (vaso == null) {
+        _statusBle(_semPermissaoBluetooth(permissoes) ? msgPermissaoBluetooth : msgVasoNaoEncontrado);
+        return;
+      }
 
-    FlutterBluePlus.scanResults.listen((resultados) async {
-      for (ScanResult r in resultados) {
-        if (r.device.platformName == "GreenSync_BLE") {
-          FlutterBluePlus.stopScan();
-          setState(() { statusBluetooth = "Conectando ao ESP32..."; });
+      _statusBle("Conectando ao ESP32...");
+      await vaso.connect(license: License.nonprofit);
+      List<BluetoothService> services = await vaso.discoverServices();
 
-          try {
-            await r.device.connect(license: License.nonprofit);
-            setState(() { statusBluetooth = "Enviando credenciais..."; });
-
-            List<BluetoothService> services = await r.device.discoverServices();
-            for (BluetoothService service in services) {
-              if (service.uuid.toString() == serviceUuid) {
-                for (BluetoothCharacteristic characteristic in service.characteristics) {
-                  if (characteristic.uuid.toString() == charUuid) {
-                    String wifiData = "${ssidController.text},${passwordController.text}";
-                    await characteristic.write(utf8.encode(wifiData));
-                    
-                    setState(() { statusBluetooth = "Credenciais enviadas!"; });
-                    await Future.delayed(const Duration(seconds: 2));
-                    await r.device.disconnect();
-                    return;
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            setState(() { statusBluetooth = "Erro na conexão."; });
+      BluetoothCharacteristic? caracteristica;
+      for (BluetoothService service in services) {
+        if (service.uuid.toString() == serviceUuid) {
+          for (BluetoothCharacteristic c in service.characteristics) {
+            if (c.uuid.toString() == charUuid) caracteristica = c;
           }
         }
       }
-    });
+      if (caracteristica == null) {
+        _statusBle(msgErroNaConexao);
+        return;
+      }
+
+      final dados = utf8.encode("${ssidController.text},${passwordController.text}");
+
+      if (!caracteristica.properties.notify) {
+        // Firmware antigo: não responde. Só dá para dizer que foi enviado.
+        _statusBle("Enviando credenciais...");
+        await caracteristica.write(dados);
+        _statusBle(msgEnviadoSemConfirmacao);
+        await Future.delayed(const Duration(seconds: 2));
+        return;
+      }
+
+      // Firmware novo: ativa as notificações ANTES de escrever e espera o resultado final.
+      final resultado = Completer<NotificacaoWifi>();
+      notificacoes = caracteristica.onValueReceived.listen((valor) {
+        final n = interpretarNotificacaoWifi(utf8.decode(valor, allowMalformed: true));
+        if (n == null) return;
+        _statusBle(n.status);
+        if (n.terminal && !resultado.isCompleted) resultado.complete(n);
+      });
+      await caracteristica.setNotifyValue(true);
+      _statusBle("Enviando credenciais...");
+      await caracteristica.write(dados);
+      // Sem trocar o status aqui: "conectando" pode ter chegado antes de o write retornar.
+      try {
+        await resultado.future.timeout(const Duration(seconds: 45));
+      } on TimeoutException {
+        _statusBle(msgSemRespostaDoVaso);
+      }
+    } catch (_) {
+      _statusBle(_semPermissaoBluetooth(permissoes) ? msgPermissaoBluetooth : msgErroNaConexao);
+    } finally {
+      await notificacoes?.cancel();
+      if (vaso != null) {
+        try { await vaso.disconnect(); } catch (_) {}
+      }
+      _bleOcupado = false;
+    }
+  }
+
+  // ------------------------------------------------------------------ rega ----
+
+  final ApiGreenSync _api = ApiGreenSync();
+  bool _regando = false; // chamada em andamento, e mais 5 s depois (evita toque duplo)
+
+  Future<void> _regarAgora() async {
+    final id = dispositivoSelecionado;
+    if (id == null || _regando) return;
+    setState(() => _regando = true);
+    final r = await _api.regar(id, duracaoS: 5);
+    if (!mounted) return;
+    mostrarSnack(context, r.mensagem, sucesso: r.sucesso);
+    await Future.delayed(const Duration(seconds: 5));
+    if (mounted) setState(() => _regando = false);
+  }
+
+  Widget _buildBotaoRegar(StatusVaso status) {
+    final botao = ElevatedButton.icon(
+      onPressed: (_regando || status.offline) ? null : _regarAgora,
+      icon: _regando
+          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.water_drop),
+      label: const Text("Regar agora"),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        minimumSize: const Size(double.infinity, 40),
+      ),
+    );
+    // Dica "Vaso offline" quando o botão está desabilitado por isso.
+    return status.offline ? Tooltip(message: "Vaso offline", child: botao) : botao;
+  }
+
+  /// Linha informativa do OTA (o backend atualiza sozinho; aqui só se mostra o estado):
+  /// "Atualizando o vaso...", "Vaso atualizado (versão X)", etc. Some se não houver o que dizer.
+  Widget _buildEstadoOta(Map<String, dynamic> dados) {
+    final ota = otaDoDispositivo(dados);
+    if (ota == null) return const SizedBox.shrink();
+    final alvo = ota['alvo'] is String ? ota['alvo'] as String : '';
+    final instalada = alvo == 's3' ? dados['fw_s3'] : dados['fw'];
+    final texto = textoOtaDoAlvo(ota, alvo, instalada is String ? instalada : null, DateTime.now());
+    if (texto.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(texto,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.black54)),
+    );
+  }
+
+  Widget _buildStatusVaso(StatusVaso status, DateTime? atualizadoEm) {
+    final cor = status.atual
+        ? Colors.green
+        : (status.estado == EstadoVaso.desatualizado ? Colors.orange : Colors.grey);
+    return Row(
+      children: [
+        Icon(Icons.circle, size: 12, color: cor),
+        const SizedBox(width: 6),
+        Text(status.rotulo, style: TextStyle(fontWeight: FontWeight.bold, color: cor)),
+        const Spacer(),
+        if (atualizadoEm != null)
+          Text(
+            "Última leitura: ${formatarUltimaLeitura(atualizadoEm, DateTime.now())}",
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+      ],
+    );
   }
 
   @override
@@ -162,6 +310,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   var dados = snapshot.data!.data() as Map<String, dynamic>;
                   var leituraAtual = dados['leitura_atual'] as Map<String, dynamic>? ?? {};
+                  final atualizadoEm = paraData(leituraAtual['updated_at']);
+                  final statusVaso = calcularStatusVaso(
+                    status: dados['status'] as String?,
+                    atualizadoEm: atualizadoEm,
+                    agora: DateTime.now(),
+                  );
+                  final bombaLigada = leituraAtual['bomba_ligada'] == true;
 
                   return Card(
                     elevation: 3,
@@ -169,23 +324,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildInfoSensor(Icons.thermostat, "Temp. Ar", "${leituraAtual['temperatura_ar'] ?? '--'}°C", Colors.orange),
-                              _buildInfoSensor(Icons.water_drop, "Umid. Ar", "${leituraAtual['umidade_ar'] ?? '--'}%", Colors.blue),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildInfoSensor(Icons.grass, "Umid. Solo", "${leituraAtual['umidade_solo'] ?? '--'}%", Colors.brown),
-                              _buildInfoSensor(Icons.science, "pH", "${leituraAtual['ph'] ?? '--'}", Colors.purple),
-                            ],
+                          _buildStatusVaso(statusVaso, atualizadoEm),
+                          if (!statusVaso.atual)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 6),
+                              child: Text(
+                                "Valores da última leitura recebida (podem estar desatualizados)",
+                                style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic),
+                              ),
+                            ),
+                          const SizedBox(height: 12),
+                          // Valores que não são de agora ficam esmaecidos, para não parecerem atuais.
+                          Opacity(
+                            opacity: statusVaso.atual ? 1.0 : 0.45,
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    _buildInfoSensor(Icons.thermostat, "Temp. Ar", "${leituraAtual['temperatura_ar'] ?? '--'}°C", Colors.orange),
+                                    _buildInfoSensor(Icons.water_drop, "Umid. Ar", "${leituraAtual['umidade_ar'] ?? '--'}%", Colors.blue),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    _buildInfoSensor(Icons.grass, "Umid. Solo", "${leituraAtual['umidade_solo'] ?? '--'}%", Colors.brown),
+                                    _buildInfoSensor(Icons.science, "pH", "${leituraAtual['ph'] ?? '--'}", Colors.purple),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                           const Divider(height: 20),
-                          
+
+                          // REGAR AGORA (5 s). O backend valida; aqui só pedimos e mostramos o resultado.
+                          _buildBotaoRegar(statusVaso),
+                          if (statusVaso.offline)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 4),
+                              child: Text("Vaso offline", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            ),
+                          if (bombaLigada)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 6),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                                  SizedBox(width: 8),
+                                  Text("Regando…", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                                ],
+                              ),
+                            ),
+                          _buildEstadoOta(dados),
+                          const SizedBox(height: 8),
+
                           // NOVO BOTÃO PARA VER O HISTÓRICO
                           ElevatedButton.icon(
                             onPressed: () {
@@ -196,6 +391,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             },
                             icon: const Icon(Icons.show_chart),
                             label: const Text("Ver Gráficos do Histórico"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green[600],
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(double.infinity, 40),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => OtaScreen(deviceId: dispositivoSelecionado!)),
+                              );
+                            },
+                            icon: const Icon(Icons.memory),
+                            label: const Text("Versão do Firmware"),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green[600],
                               foregroundColor: Colors.white,
@@ -272,11 +483,15 @@ class HistoricoScreen extends StatelessWidget {
             .collection('devices')
             .doc(deviceId)
             .collection('historico')
+            .orderBy('timestamp', descending: true)
             .limit(20) 
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text("Não consegui carregar o histórico"));
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text("Nenhum dado histórico encontrado."));
@@ -287,8 +502,9 @@ class HistoricoScreen extends StatelessWidget {
           List<FlSpot> pontosUmidadeSolo = [];
           List<FlSpot> pontosPh = [];
           
-          var docs = snapshot.data!.docs;
-          
+          // A consulta vem do mais novo para o mais antigo; o gráfico vai do mais antigo ao mais novo.
+          var docs = snapshot.data!.docs.reversed.toList();
+
           // Extrai os 4 parâmetros de cada documento
           for (int i = 0; i < docs.length; i++) {
             var dados = docs[i].data() as Map<String, dynamic>;

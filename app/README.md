@@ -39,4 +39,27 @@ Passo a passo no app:
 3. Configure o Firebase localmente: `dart pub global run flutterfire_cli:flutterfire configure`
 4. Execute o projeto: `flutter run`
 
-O BLE só funciona em aparelho físico (o emulador não tem Bluetooth).
+## 🔌 Backend (rega manual) e OTA automático
+
+O botão **Regar agora** fala com o backend do GreenSync (`POST /dispositivos/{id}/regar`). O endereço e a chave **não ficam no código**: são passados na hora de rodar.
+
+**O app não atualiza firmware.** Quando sai uma versão nova, o **backend atualiza os vasos sozinho** (OTA automático). O app só **mostra** a versão instalada e o andamento; não há botão de atualizar e nenhuma chamada de atualização.
+
+```bash
+flutter run --dart-define=API_URL=http://IP_DO_BACKEND:8000 --dart-define=API_KEY=sua_chave
+```
+
+- `API_URL`: endereço do backend (ex.: `http://192.168.0.10:8000` na rede local). Se estiver vazia, o botão de rega mostra "Backend não configurado" e não chama nada.
+- `API_KEY`: a mesma `API_KEY` do `.env` do backend (cabeçalho `X-API-Key`), usada **só** na rega. O app **nunca** usa a chave de administrador.
+- HTTP sem TLS só funciona em **debug** (`android/app/src/debug/AndroidManifest.xml`). Para release, use um backend com HTTPS.
+- Funções do app: **Regar agora** (5 s), selo Online/Offline com a hora da última leitura, **Versão do Firmware** (só leitura) e o envio de Wi-Fi por BLE, que mostra o resultado quando o firmware do vaso responde.
+- **Versão do Firmware** (tela informativa, em tempo real pelo Firestore): versão instalada de cada placa (`fw` e `fw_s3`) e o estado da atualização automática (`devices/{id}.ota.estado`), também resumido no cartão do vaso: "Atualizando o vaso..." (baixando/aplicando), "Vaso atualizado (versão X)", "A atualização falhou, o vaso continua na versão anterior" e "Vaso voltou para a versão anterior". Atualização parada há mais de 10 minutos deixa de mostrar "Atualizando".
+- Cadastrar, retirar ou reverter versões de firmware é feito só pelo administrador, direto no backend.
+
+### Testes
+
+```bash
+flutter test
+```
+
+`test/mensagens_test.dart`, `test/api_test.dart`, `test/status_vaso_test.dart`, `test/ota_logica_test.dart` e `test/ota_texto_test.dart` são testes unitários puros (sem Firebase nem rede). O `test/widget_test.dart` original é o exemplo do contador do Flutter e não corresponde a este app.
